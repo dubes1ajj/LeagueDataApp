@@ -45,6 +45,25 @@ export default function HoleProfileModal({ holeNum, nine, events, courseConfig, 
   const relevantEvents = useMemo(() =>
     events.filter(ev => ev.nineHoles === nine), [events, nine]);
 
+  const allScores = useMemo(() => {
+    const scores: number[] = [];
+    for (const ev of relevantEvents) {
+      for (const player of ev.players) {
+        if (player.didNotPlay) continue;
+        const score = player.holes[slotIdx];
+        if (score !== null && score !== undefined) scores.push(score);
+      }
+    }
+    return scores;
+  }, [relevantEvents, slotIdx]);
+
+  const overallAvg = allScores.length
+    ? Math.round(allScores.reduce((s, n) => s + n, 0) / allScores.length * 100) / 100
+    : null;
+
+  const overallVsPar = overallAvg !== null && par !== null
+    ? Math.round((overallAvg - par) * 100) / 100 : null;
+
   // ── Per-player stats for this hole ────────────────────────────────────
   const playerStats = useMemo(() => {
     const map: Record<string, { scores: number[]; name: string }> = {};
@@ -57,13 +76,18 @@ export default function HoleProfileModal({ holeNum, nine, events, courseConfig, 
         map[p.playerName].scores.push(score);
       }
     }
-    return Object.values(map)
+    const countsByAverage = new Map<string, number>();
+
+    const ranked = Object.values(map)
       .map(({ name, scores }) => {
         const avg = scores.reduce((s, n) => s + n, 0) / scores.length;
+        const roundedAvg = Math.round(avg * 100) / 100;
+        const averageKey = roundedAvg.toFixed(2);
+        countsByAverage.set(averageKey, (countsByAverage.get(averageKey) ?? 0) + 1);
         return {
           name,
           rounds:  scores.length,
-          avg:     Math.round(avg * 100) / 100,
+          avg:     roundedAvg,
           avgVsPar: par !== null ? Math.round((avg - par) * 100) / 100 : null,
           best:    Math.min(...scores),
           worst:   Math.max(...scores),
@@ -74,14 +98,23 @@ export default function HoleProfileModal({ holeNum, nine, events, courseConfig, 
         if (a.avg !== b.avg) return a.avg - b.avg; // lower = better
         return b.rounds - a.rounds;
       });
-  }, [relevantEvents, slotIdx, par]);
+
+    let previousRank = 0;
+    return ranked.map((entry, index) => {
+      const previous = ranked[index - 1];
+      const rank = previous && previous.avg === entry.avg ? previousRank : index + 1;
+      previousRank = rank;
+      return {
+        ...entry,
+        rank,
+        tied: (countsByAverage.get(entry.avg.toFixed(2)) ?? 0) > 1,
+        vsFieldAvg: overallAvg !== null ? Math.round((entry.avg - overallAvg) * 100) / 100 : null,
+      };
+    });
+  }, [overallAvg, relevantEvents, slotIdx, par]);
 
   const displayNames = useMemo(() =>
     buildDisplayNames(playerStats.map(p => p.name)), [playerStats]);
-
-  // ── Score distribution (aggregate) ───────────────────────────────────
-  const allScores = useMemo(() =>
-    playerStats.flatMap(p => p.scores), [playerStats]);
 
   const scoreFreq = useMemo(() => {
     const freq: Record<number, number> = {};
@@ -137,11 +170,6 @@ export default function HoleProfileModal({ holeNum, nine, events, courseConfig, 
   }, [relevantEvents, slotIdx, par]);
 
   const holeInfo = courseConfig?.holes[holeNum - 1];
-  const overallAvg = allScores.length
-    ? Math.round(allScores.reduce((s, n) => s + n, 0) / allScores.length * 100) / 100
-    : null;
-  const overallVsPar = overallAvg !== null && par !== null
-    ? Math.round((overallAvg - par) * 100) / 100 : null;
 
   return (
     <div className="modal-overlay" onClick={onClose}>
@@ -217,7 +245,7 @@ export default function HoleProfileModal({ holeNum, nine, events, courseConfig, 
                 )}
                 {par !== null && pieData.find(d => d.name === 'Eagles') && (
                   <div className="pp-stat-card">
-                    <span className="pp-stat-label">Eagles 🦅</span>
+                    <span className="pp-stat-label">Eagles</span>
                     <span className="pp-stat-value" style={{ color: TYPE_COLORS.Eagles }}>
                       {pieData.find(d => d.name === 'Eagles')?.value ?? 0}
                     </span>
@@ -308,6 +336,7 @@ export default function HoleProfileModal({ holeNum, nine, events, courseConfig, 
                       <th className="pp-sc-label" style={{ textAlign: 'left' }}>Player</th>
                       <th>Rounds</th>
                       <th>Avg</th>
+                      <th title="Player average minus field average — negative is better">vs Field Avg</th>
                       {par !== null && <th>vs Par</th>}
                       <th style={{ color: '#22c55e' }}>Best</th>
                       <th style={{ color: '#ef4444' }}>Worst</th>
@@ -318,12 +347,14 @@ export default function HoleProfileModal({ holeNum, nine, events, courseConfig, 
                     {playerStats.map((ps, idx) => {
                       const color = getPlayerColor(ps.name);
                       const dispName = displayNames[ps.name] ?? ps.name.split(',')[0].trim();
-                      const isTop = idx === 0;
-                      const isBottom = idx === playerStats.length - 1 && playerStats.length > 1;
+                      const vsFieldColor = ps.vsFieldAvg === null ? 'var(--text2)'
+                        : ps.vsFieldAvg < 0 ? '#22c55e'
+                        : ps.vsFieldAvg > 0 ? '#ef4444'
+                        : 'var(--text2)';
                       return (
                         <tr key={ps.name} className={idx % 2 === 0 ? 'pp-sc-row' : ''}>
-                          <td style={{ textAlign: 'left', fontWeight: 700, color: isTop ? '#22c55e' : isBottom ? '#ef4444' : 'var(--text2)', paddingLeft: 8 }}>
-                            {isTop ? '🏆' : isBottom ? '🔻' : `#${idx + 1}`}
+                          <td style={{ textAlign: 'left', fontWeight: 700, color: 'var(--text2)', paddingLeft: 8 }}>
+                            {ps.tied ? `T${ps.rank}` : ps.rank}
                           </td>
                           <td style={{ textAlign: 'left' }}>
                             <span className="player-dot" style={{ background: color }} />
@@ -331,6 +362,9 @@ export default function HoleProfileModal({ holeNum, nine, events, courseConfig, 
                           </td>
                           <td className="pp-sc-hole-cell">{ps.rounds}</td>
                           <td className="pp-sc-hole-cell" style={{ fontWeight: 700 }}>{ps.avg.toFixed(2)}</td>
+                          <td className="pp-sc-hole-cell" style={{ color: vsFieldColor, fontWeight: 700 }}>
+                            {ps.vsFieldAvg !== null ? `${ps.vsFieldAvg >= 0 ? '+' : ''}${ps.vsFieldAvg.toFixed(2)}` : '—'}
+                          </td>
                           {par !== null && (
                             <td className="pp-sc-hole-cell" style={{ color: avgVsParColor(ps.avgVsPar), fontWeight: 700 }}>
                               {ps.avgVsPar !== null ? `${ps.avgVsPar >= 0 ? '+' : ''}${ps.avgVsPar.toFixed(2)}` : '—'}

@@ -13,7 +13,7 @@ export default memo(function SeasonDashboard({ events, courseConfig }: SeasonDas
   if (!cards.length) {
     return (
       <div className="chart-container empty-state">
-        <h3 className="chart-title">Season Dashboard</h3>
+        <h3 className="chart-title">Season Storylines</h3>
         <p className="empty-text">Add events to generate storyline cards.</p>
       </div>
     );
@@ -21,7 +21,7 @@ export default memo(function SeasonDashboard({ events, courseConfig }: SeasonDas
 
   return (
     <div className="chart-container">
-      <h3 className="chart-title">Season Dashboard</h3>
+      <h3 className="chart-title">Season Storylines</h3>
       <p className="chart-subtitle">Quick storylines and season context</p>
       <div className="story-grid">
         {cards.map((card) => (

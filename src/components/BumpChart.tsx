@@ -13,9 +13,12 @@ import { useIsMobile } from '../lib/useIsMobile';
 
 interface BumpChartProps {
   events: EventData[];
+  onPlayerClick?: (playerName: string) => void;
+  showTable?: boolean;
+  showHistory?: boolean;
 }
 
-export default memo(function BumpChart({ events }: BumpChartProps) {
+export default memo(function BumpChart({ events, onPlayerClick, showTable = true, showHistory = true }: BumpChartProps) {
   const sorted = useMemo(() => [...events].sort((a, b) => a.eventNumber - b.eventNumber), [events]);
   const latest = sorted[sorted.length - 1];
   const prev   = sorted[sorted.length - 2];
@@ -44,6 +47,15 @@ export default memo(function BumpChart({ events }: BumpChartProps) {
   const movementRows = useMemo(() => {
     if (!latest) return [];
     const leader = latest.standings[0]?.cumulativePoints ?? 0;
+    const latestPoints = latest.players.filter((player) => !player.didNotPlay).map((player) => player.points);
+    const latestMaxPoints = latestPoints.length ? Math.max(...latestPoints) : 0;
+    const latestMinPoints = latestPoints.length ? Math.min(...latestPoints) : 0;
+    const tiedPositions = new Set(
+      latest.standings
+        .map((standing) => standing.position)
+        .filter((position, index, all) => all.indexOf(position) !== index)
+    );
+
     return [...latest.standings]
       .sort((a, b) => a.position - b.position)
       .map(s => {
@@ -51,9 +63,23 @@ export default memo(function BumpChart({ events }: BumpChartProps) {
         const change = prevStanding ? prevStanding.position - s.position : null; // positive = moved up
         const gap = leader - s.cumulativePoints;
         const evPts = latest.players.find(p => p.playerName === s.playerName)?.points ?? null;
-        return { ...s, change, gap, evPts };
+        const eventCount = sorted.reduce((count, event) => {
+          const player = event.players.find((candidate) => candidate.playerName === s.playerName);
+          return player && !player.didNotPlay ? count + 1 : count;
+        }, 0);
+        return {
+          ...s,
+          change,
+          gap,
+          evPts,
+          eventCount,
+          avgPoints: eventCount > 0 ? Math.round((s.cumulativePoints / eventCount) * 100) / 100 : null,
+          tied: tiedPositions.has(s.position),
+          latestMinPoints,
+          latestMaxPoints,
+        };
       });
-  }, [latest, prev]);
+  }, [latest, prev, sorted]);
 
   // ── Chart data ────────────────────────────────────────────────────────────
   const chartData = useMemo(() => {
@@ -73,12 +99,56 @@ export default memo(function BumpChart({ events }: BumpChartProps) {
   const hasSelection = selected.size > 0;
   const lastIndex = chartData.length - 1;
 
+  function getEventPointsStyle(points: number | null, minPoints: number, maxPoints: number): React.CSSProperties {
+    if (points === null) return { color: isDark ? '#555' : '#8b8b98' };
+    if (maxPoints === minPoints) {
+      return {
+        background: isDark ? 'rgba(34,197,94,0.22)' : 'rgba(34,197,94,0.16)',
+        color: isDark ? '#f5f5f5' : '#17311f',
+      };
+    }
+
+    const ratio = (points - minPoints) / (maxPoints - minPoints);
+    const stops: Array<[number, [number, number, number]]> = [
+      [0, [239, 68, 68]],
+      [0.33, [255, 255, 255]],
+      [0.66, [250, 204, 21]],
+      [1, [34, 197, 94]],
+    ];
+
+    let rgb = stops[stops.length - 1][1];
+    for (let index = 0; index < stops.length - 1; index += 1) {
+      const [startRatio, startColor] = stops[index];
+      const [endRatio, endColor] = stops[index + 1];
+      if (ratio >= startRatio && ratio <= endRatio) {
+        const weight = (ratio - startRatio) / (endRatio - startRatio || 1);
+        rgb = startColor.map((channel, channelIndex) => (
+          Math.round(channel + (endColor[channelIndex] - channel) * weight)
+        )) as [number, number, number];
+        break;
+      }
+    }
+
+    const alpha = isDark ? 0.26 : 0.18;
+    return {
+      background: `rgba(${rgb[0]}, ${rgb[1]}, ${rgb[2]}, ${alpha})`,
+      color: isDark ? '#f5f5f5' : '#1a1a2e',
+      fontWeight: 700,
+      borderRadius: 999,
+      display: 'inline-flex',
+      alignItems: 'center',
+      justifyContent: 'center',
+      minWidth: 52,
+      padding: '4px 10px',
+    };
+  }
+
   if (events.length === 0) return <EmptyState message="Add at least one event to see standings." />;
 
   return (
     <>
       {/* ── Rank Movement Table ────────────────────────────────────────── */}
-      <div className="chart-container">
+      {showTable && <div className="chart-container">
         <h3 className="chart-title">
           Current Rankings
           {latest && <span className="chart-badge">After Event {latest.eventNumber}</span>}
@@ -95,8 +165,9 @@ export default memo(function BumpChart({ events }: BumpChartProps) {
                 {prev && <th className="bump-th-change" title="Change from previous event">±</th>}
                 <th className="bump-th-player">Player</th>
                 <th className="bump-th-pts">Total Pts</th>
+                <th className="bump-th-pts">Avg Pts</th>
                 <th className="bump-th-gap" title="Points behind leader">Gap</th>
-                <th className="bump-th-evpts" title={`Points this event (Event ${latest?.eventNumber})`}>This Event</th>
+                <th className="bump-th-evpts" title={`Points from the latest event (Event ${latest?.eventNumber})`}>Last Event</th>
               </tr>
             </thead>
             <tbody>
@@ -105,7 +176,7 @@ export default memo(function BumpChart({ events }: BumpChartProps) {
                 const isTop3 = row.position <= 3;
                 const podiumColors = ['#f59e0b', '#9ca3af', '#b45309'];
                 const badgeBg = isTop3 ? podiumColors[row.position - 1] : (isDark ? '#2a2a3e' : '#e4e4ec');
-                const badgeText = '#fff';
+                const badgeText = isTop3 || isDark ? '#fff' : '#1a1a2e';
 
                 // Change arrow
                 let arrow = null;
@@ -123,10 +194,15 @@ export default memo(function BumpChart({ events }: BumpChartProps) {
                 }
 
                 return (
-                  <tr key={row.playerName} className={`bump-row ${idx % 2 === 0 ? 'bump-row-even' : ''}`}>
+                  <tr
+                    key={row.playerName}
+                    className={`bump-row ${idx % 2 === 0 ? 'bump-row-even' : ''} ${onPlayerClick ? 'bump-row-clickable' : ''}`}
+                    onClick={onPlayerClick ? () => onPlayerClick(row.playerName) : undefined}
+                    title={onPlayerClick ? `View ${row.playerName}'s profile` : undefined}
+                  >
                     <td className="bump-td-rank">
                       <span className="pos-badge" style={{ background: badgeBg, color: badgeText, minWidth: 28, display: 'inline-flex', alignItems: 'center', justifyContent: 'center' }}>
-                        {row.position}
+                        {row.tied ? `T${row.position}` : row.position}
                       </span>
                     </td>
                     {prev && <td className="bump-td-change">{arrow}</td>}
@@ -135,11 +211,14 @@ export default memo(function BumpChart({ events }: BumpChartProps) {
                       {row.playerName}
                     </td>
                     <td className="bump-td-pts">{row.cumulativePoints}</td>
+                    <td className="bump-td-gap">{row.avgPoints !== null ? row.avgPoints.toFixed(2) : '—'}</td>
                     <td className="bump-td-gap" style={{ color: row.gap === 0 ? '#22c55e' : (isDark ? '#888' : '#666') }}>
                       {row.gap === 0 ? '—' : `-${row.gap}`}
                     </td>
-                    <td className="bump-td-evpts" style={{ color: row.evPts !== null && row.evPts > 0 ? color : (isDark ? '#555' : '#aaa') }}>
-                      {row.evPts !== null ? row.evPts : '—'}
+                    <td className="bump-td-evpts">
+                      <span style={getEventPointsStyle(row.evPts, row.latestMinPoints, row.latestMaxPoints)}>
+                        {row.evPts !== null ? row.evPts : '—'}
+                      </span>
                     </td>
                   </tr>
                 );
@@ -147,10 +226,10 @@ export default memo(function BumpChart({ events }: BumpChartProps) {
             </tbody>
           </table>
         </div>
-      </div>
+      </div>}
 
       {/* ── Bump line chart ─────────────────────────────────────────── */}
-      {events.length >= 2 && (
+      {showHistory && events.length >= 2 && (
         <div className="chart-container">
           <h3 className="chart-title">Position History</h3>
           <p className="chart-subtitle">
@@ -232,6 +311,9 @@ export default memo(function BumpChart({ events }: BumpChartProps) {
           </ResponsiveContainer>
           <ClickableLegend players={relevantPlayers} selected={selected} onToggle={toggle} onClearAll={clearAll} />
         </div>
+      )}
+      {showHistory && events.length < 2 && (
+        <EmptyState message="Add at least two events to see position history." />
       )}
     </>
   );

@@ -19,7 +19,6 @@ import GrossNetScoresChart from './components/GrossNetScoresChart';
 import HoleStatsChart from './components/HoleStatsChart';
 import HoleProfileModal from './components/HoleProfileModal';
 import CumulativePointsChart from './components/CumulativePointsChart';
-import StandingsTable from './components/StandingsTable';
 import EventList from './components/EventList';
 import CourseConfigModal from './components/CourseConfigModal';
 import PlayerProfileModal from './components/PlayerProfileModal';
@@ -27,28 +26,24 @@ import AdminUnlockModal from './components/AdminUnlockModal';
 import SettingsPage from './components/SettingsPage';
 import SeasonDashboard from './components/SeasonDashboard';
 import WeeklyRecapPage from './components/WeeklyRecapPage';
-import TrendFilterBar, { type TrendFilterState } from './components/TrendFilterBar';
-import ComparePlayersPanel from './components/ComparePlayersPanel';
+import EventFilterBar from './components/EventFilterBar';
 import TrendsPage from './components/TrendsPage';
 import { useAdminMode } from './lib/useAdminMode';
-import { filterEventsByWindow } from './lib/analytics';
 import {
-  PlusCircle, Trophy, TrendingUp, Target, Activity,
-  Sun, Moon, Lock, Unlock, Newspaper, BarChart3, Settings,
+  PlusCircle, Trophy, TrendingUp, Target,
+  Sun, Moon, Lock, Unlock, BarChart3, Settings,
 } from 'lucide-react';
 import { useTheme } from './lib/useTheme';
 import { useFilteredEvents } from './lib/useFilteredEvents';
 import './App.css';
 
-type Tab = 'overview' | 'trends' | 'recap' | 'bump' | 'points' | 'scoring' | 'settings';
+type Tab = 'overview' | 'trends' | 'points' | 'scoring' | 'settings';
 
 const ALL_TABS: { id: Tab; label: string; icon: React.ReactNode; adminOnly?: boolean }[] = [
   { id: 'overview',  label: 'Overview',    icon: <Trophy size={16} /> },
   { id: 'trends',    label: 'Trends',      icon: <BarChart3 size={16} /> },
-  { id: 'recap',     label: 'Recap',       icon: <Newspaper size={16} /> },
-  { id: 'bump',      label: 'Rankings',    icon: <Activity size={16} /> },
   { id: 'points',    label: 'Points Race', icon: <TrendingUp size={16} /> },
-  { id: 'scoring',   label: 'Scoring',     icon: <Target size={16} /> },
+  { id: 'scoring',   label: 'Hole Stats',  icon: <Target size={16} /> },
   { id: 'settings',  label: 'Settings',    icon: <Settings size={16} />, adminOnly: true },
 ];
 
@@ -71,9 +66,9 @@ export default function App() {
   const [activeTab, setActiveTab] = useState<Tab>('overview');
   const [profilePlayer, setProfilePlayer] = useState<string | null>(null);
   const [holeProfile, setHoleProfile] = useState<{ holeNum: number; nine: 'front' | 'back' } | null>(null);
-  const [pointsFilter, setPointsFilter] = useState<TrendFilterState>({ windowKey: 'all', nine: 'all' });
-  const [scoringFilter, setScoringFilter] = useState<TrendFilterState>({ windowKey: 'all', nine: 'all' });
-  const [trendsFilter, setTrendsFilter] = useState<TrendFilterState>({ windowKey: 'all', nine: 'all' });
+  const [pointsEventIds, setPointsEventIds] = useState<string[] | null>(null);
+  const [scoringEventIds, setScoringEventIds] = useState<string[] | null>(null);
+  const [trendsEventIds, setTrendsEventIds] = useState<string[] | null>(null);
 
   const TABS = ALL_TABS.filter(t => !t.adminOnly || isAdmin);
 
@@ -271,17 +266,31 @@ export default function App() {
   const events = league.events;
   const visibleEvents = useMemo(() => events.filter(e => !hiddenEventIds.has(e.id)), [events, hiddenEventIds]);
   const filteredEvents = useFilteredEvents(visibleEvents, playerConfig);
+  const filteredEventIds = useMemo(() => filteredEvents.map((event) => event.id), [filteredEvents]);
+
+  useEffect(() => {
+    setPointsEventIds((current) => current === null ? null : current.filter((id) => filteredEventIds.includes(id)));
+    setScoringEventIds((current) => current === null ? null : current.filter((id) => filteredEventIds.includes(id)));
+    setTrendsEventIds((current) => current === null ? null : current.filter((id) => filteredEventIds.includes(id)));
+  }, [filteredEventIds]);
+
+  const filterEventsByIds = useCallback((selectedIds: string[] | null) => {
+    if (selectedIds === null) return filteredEvents;
+    const selectedSet = new Set(selectedIds);
+    return filteredEvents.filter((event) => selectedSet.has(event.id));
+  }, [filteredEvents]);
+
   const pointsEvents = useMemo(
-    () => filterEventsByWindow(filteredEvents, pointsFilter.windowKey, pointsFilter.nine),
-    [filteredEvents, pointsFilter]
+    () => filterEventsByIds(pointsEventIds),
+    [filterEventsByIds, pointsEventIds]
   );
   const scoringEvents = useMemo(
-    () => filterEventsByWindow(filteredEvents, scoringFilter.windowKey, scoringFilter.nine),
-    [filteredEvents, scoringFilter]
+    () => filterEventsByIds(scoringEventIds),
+    [filterEventsByIds, scoringEventIds]
   );
   const trendsEvents = useMemo(
-    () => filterEventsByWindow(filteredEvents, trendsFilter.windowKey, trendsFilter.nine),
-    [filteredEvents, trendsFilter]
+    () => filterEventsByIds(trendsEventIds),
+    [filterEventsByIds, trendsEventIds]
   );
 
   if (leagueLoading) {
@@ -368,34 +377,32 @@ export default function App() {
         <div className="charts-area">
           {activeTab === 'overview' && (
             <div className="overview-stack">
-              <StandingsTable events={filteredEvents} onPlayerClick={setProfilePlayer} />
+              <BumpChart events={filteredEvents} onPlayerClick={setProfilePlayer} showHistory={false} />
               <CumulativePointsChart events={filteredEvents} />
+              <BumpChart events={filteredEvents} showTable={false} />
               <SeasonDashboard events={filteredEvents} courseConfig={courseConfig} />
-              <ComparePlayersPanel events={filteredEvents} courseConfig={courseConfig} />
+              <WeeklyRecapPage events={filteredEvents} courseConfig={courseConfig} />
             </div>
-          )}
-          {activeTab === 'recap' && (
-            <WeeklyRecapPage events={filteredEvents} courseConfig={courseConfig} />
           )}
           {activeTab === 'trends' && (
             <TrendsPage
               events={trendsEvents}
+              allEvents={filteredEvents}
               courseConfig={courseConfig}
-              filter={trendsFilter}
-              onFilterChange={setTrendsFilter}
+              filterEventIds={trendsEventIds}
+              onFilterChange={setTrendsEventIds}
             />
           )}
-          {activeTab === 'bump' && <BumpChart events={filteredEvents} />}
           {activeTab === 'points' && (
             <>
-              <TrendFilterBar title="Points Filters" value={pointsFilter} onChange={setPointsFilter} />
+              <EventFilterBar title="Points Filters" events={filteredEvents} selectedEventIds={pointsEventIds} onChange={setPointsEventIds} />
               <CumulativePointsChart events={pointsEvents} />
               <WeeklyPointsChart events={pointsEvents} />
             </>
           )}
           {activeTab === 'scoring' && (
             <>
-              <TrendFilterBar title="Scoring Filters" value={scoringFilter} onChange={setScoringFilter} />
+              <EventFilterBar title="Hole Stats Filters" events={filteredEvents} selectedEventIds={scoringEventIds} onChange={setScoringEventIds} />
               <HoleStatsChart events={scoringEvents} courseConfig={courseConfig} onSetupCourse={openCourseSetup} onHoleClick={(n, nine) => setHoleProfile({ holeNum: n, nine })} />
               <GrossNetScoresChart events={scoringEvents} scoreType="net" />
               <GrossNetScoresChart events={scoringEvents} scoreType="gross" />

@@ -26,20 +26,6 @@ export function sortEvents(events: EventData[]): EventData[] {
   return [...events].sort((a, b) => a.eventNumber - b.eventNumber);
 }
 
-export type TrendWindowKey = 'all' | 'last1' | 'last2' | 'last3' | 'last5' | 'first3' | 'secondHalf';
-
-export function filterEventsByWindow(events: EventData[], windowKey: TrendWindowKey, nine: 'all' | 'front' | 'back' = 'all'): EventData[] {
-  let sorted = sortEvents(events);
-  if (nine !== 'all') sorted = sorted.filter(e => e.nineHoles === nine);
-  if (windowKey === 'last1') return sorted.slice(-1);
-  if (windowKey === 'last2') return sorted.slice(-2);
-  if (windowKey === 'last3') return sorted.slice(-3);
-  if (windowKey === 'last5') return sorted.slice(-5);
-  if (windowKey === 'first3') return sorted.slice(0, 3);
-  if (windowKey === 'secondHalf') return sorted.slice(Math.floor(sorted.length / 2));
-  return sorted;
-}
-
 function formatPlayerNames(playerNames: string[]): string {
   const shortNames = playerNames.map(name => name.split(',')[0]);
   if (shortNames.length <= 2) return shortNames.join(' & ');

@@ -133,7 +133,7 @@ export default memo(function HoleStatsChart({ events, courseConfig, onSetupCours
         Math.max(1, stats.filter(s => s.avgVsPar !== null).length)
       : null;
 
-    // Bar chart data: avg score per hole
+    // Bar chart data: average vs par per hole so mixed pars stay comparable.
     const avgChartData = stats.map(s => ({
       hole: `H${s.holeNum}`,
       avg: s.avgScore,
@@ -167,7 +167,7 @@ export default memo(function HoleStatsChart({ events, courseConfig, onSetupCours
             {/* ── Avg score vs par bar chart ─────────────────────── */}
             {hasPar && (
               <>
-                <p className="chart-subtitle">Average score vs par per hole (bar = avg score, line = par)</p>
+                <p className="chart-subtitle">Average score versus par per hole</p>
                 <ResponsiveContainer width="100%" height={200}>
                   <BarChart data={avgChartData} margin={{ top: 10, right: 10, left: -10, bottom: 4 }}>
                     <CartesianGrid strokeDasharray="3 3" stroke={c.grid} />
@@ -180,23 +180,16 @@ export default memo(function HoleStatsChart({ events, courseConfig, onSetupCours
                         const n = Number(val);
                         if (key === 'avg') return [n.toFixed(2), 'Avg score'];
                         if (key === 'par') return [String(n), 'Par'];
+                        if (key === 'vsPar') return [`${n >= 0 ? '+' : ''}${n.toFixed(2)}`, 'vs par'];
                         return [String(n), String(key)];
                       }}
                     />
                     <ReferenceLine y={0} stroke={c.grid} />
-                    <Bar dataKey="avg" name="Avg score" radius={[3, 3, 0, 0]}>
+                    <Bar dataKey="vsPar" name="vs par" radius={[3, 3, 0, 0]}>
                       {avgChartData.map((d, i) => (
                         <Cell key={i} fill={avgVsParColor(d.vsPar)} />
                       ))}
                     </Bar>
-                    {/* Par reference dots */}
-                    {stats.map((s, i) => s.par !== null && (
-                      <ReferenceLine
-                        key={i}
-                        x={`H${s.holeNum}`}
-                        stroke="transparent"
-                      />
-                    ))}
                   </BarChart>
                 </ResponsiveContainer>
               </>
@@ -241,8 +234,8 @@ export default memo(function HoleStatsChart({ events, courseConfig, onSetupCours
                     {hasPar && <th title="Average vs par">vs Par</th>}
                     <th title="Best (lowest) score">Best</th>
                     <th title="Worst (highest) score">Worst</th>
-                    <th style={{ color: TYPE_COLORS.eagles }}>🦅</th>
-                    <th style={{ color: TYPE_COLORS.birdies }}>🐦</th>
+                    <th style={{ color: TYPE_COLORS.eagles }}>Eagle</th>
+                    <th style={{ color: TYPE_COLORS.birdies }}>Birdie</th>
                     <th style={{ color: TYPE_COLORS.pars }}>Par</th>
                     <th style={{ color: TYPE_COLORS.bogeys }}>Bogey</th>
                     <th style={{ color: TYPE_COLORS.doubleBogeys }}>Dbl</th>

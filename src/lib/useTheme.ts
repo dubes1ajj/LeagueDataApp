@@ -5,8 +5,7 @@ const KEY = 'golf_tracker_theme';
 export function useTheme() {
   const [isDark, setIsDark] = useState<boolean>(() => {
     const stored = localStorage.getItem(KEY);
-    // Default to dark if nothing stored
-    return stored === null ? true : stored === 'dark';
+    return stored === null ? false : stored === 'dark';
   });
 
   useEffect(() => {

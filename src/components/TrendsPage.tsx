@@ -1,6 +1,6 @@
 import { memo } from 'react';
 import type { CourseConfig, EventData } from '../types/golf';
-import TrendFilterBar, { type TrendFilterState } from './TrendFilterBar';
+import EventFilterBar from './EventFilterBar';
 import CumulativePointsChart from './CumulativePointsChart';
 import GrossNetScoresChart from './GrossNetScoresChart';
 import HandicapTrendChart from './HandicapTrendChart';
@@ -8,15 +8,16 @@ import ComparePlayersPanel from './ComparePlayersPanel';
 
 interface TrendsPageProps {
   events: EventData[];
+  allEvents: EventData[];
   courseConfig: CourseConfig | null;
-  filter: TrendFilterState;
-  onFilterChange: (value: TrendFilterState) => void;
+  filterEventIds: string[] | null;
+  onFilterChange: (value: string[] | null) => void;
 }
 
-export default memo(function TrendsPage({ events, courseConfig, filter, onFilterChange }: TrendsPageProps) {
+export default memo(function TrendsPage({ events, allEvents, courseConfig, filterEventIds, onFilterChange }: TrendsPageProps) {
   return (
     <>
-      <TrendFilterBar title="Trend Filters" value={filter} onChange={onFilterChange} />
+      <EventFilterBar title="Trend Filters" events={allEvents} selectedEventIds={filterEventIds} onChange={onFilterChange} />
       <CumulativePointsChart events={events} />
       <div className="pp-charts-row">
         <div className="pp-chart-half">
