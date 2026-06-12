@@ -1,0 +1,14 @@
+[build]
+  command = "npm run build"
+  publish = "dist"
+
+[functions]
+  directory = "netlify/functions"
+
+# Proxy /golf-proxy/* → service.golfleague.net
+# This replicates the Vite dev-server proxy so URL import works in production.
+[[redirects]]
+  from = "/golf-proxy/*"
+  to = "https://service.golfleague.net/:splat"
+  status = 200
+  force = true

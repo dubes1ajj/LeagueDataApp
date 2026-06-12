@@ -1,0 +1,187 @@
+/* ===== Reset & Base ===== */
+*, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+:root {
+  --bg: #0f0f1a;
+  --bg2: #16162a;
+  --bg3: #1e1e35;
+  --bg4: #252540;
+  --border: #2a2a4a;
+  --text: #e2e2f0;
+  --text2: #a0a0c0;
+  --accent: #4f8ef7;
+  --accent2: #6366f1;
+  --green: #22c55e;
+  --red: #ef4444;
+  --gold: #f59e0b;
+  --sidebar-w: 240px;
+  /* chart-specific */
+  --chart-grid: #2a2a3e;
+  --chart-tooltip-bg: #13131f;
+  --chart-axis: #888;
+  --chart-tick: #aaa;
+}
+
+/* ===== Light mode ===== */
+.light {
+  --bg: #f5f5f7;
+  --bg2: #ffffff;
+  --bg3: #f0f0f5;
+  --bg4: #e4e4ec;
+  --border: #d0d0de;
+  --text: #1a1a2e;
+  --text2: #5a5a7a;
+  --accent: #3b82f6;
+  --accent2: #4f46e5;
+  --green: #16a34a;
+  --red: #dc2626;
+  --gold: #b45309;
+  /* chart-specific */
+  --chart-grid: #dde0ee;
+  --chart-tooltip-bg: #ffffff;
+  --chart-axis: #888;
+  --chart-tick: #555;
+}
+
+html, body, #root {
+  height: 100%;
+  font-family: 'Segoe UI', system-ui, sans-serif;
+  background: var(--bg);
+  color: var(--text);
+  font-size: 14px;
+  line-height: 1.5;
+}
+
+button { cursor: pointer; font-family: inherit; }
+input, textarea { font-family: inherit; }
+
+/* ===== Desktop reset (must come before mobile overrides) ===== */
+@media (min-width: 901px) {
+  .app {
+    display: flex !important;
+    height: 100vh !important;
+    height: 100dvh !important;
+    overflow: hidden !important;
+    flex-direction: row !important;
+  }
+  .main {
+    display: flex !important;
+    flex-direction: column !important;
+    flex: 1 !important;
+    overflow-y: auto !important;
+    height: auto !important;
+    width: auto !important;
+  }
+  .mobile-bottom-nav { display: none !important; }
+  .mobile-league-switcher { display: none !important; }
+  .desktop-only { display: inline !important; }
+}
+
+/* ===== Mobile layout ===== */
+@media (max-width: 900px) {
+
+  /* App: let it be a normal block, not a flex container that fights scroll */
+  .app {
+    display: block;
+    height: auto;
+    overflow: visible;
+  }
+
+  /* Hide desktop sidebar */
+  .sidebar { display: none; }
+
+  /* Main takes full viewport height, scrolls internally */
+  .main {
+    display: flex;
+    flex-direction: column;
+    height: 100vh;
+    height: 100dvh;
+    overflow: hidden;
+    width: 100%;
+  }
+
+  /* Fix the header to the top */
+  .main-header {
+    position: relative !important;
+    flex-shrink: 0;
+    padding: 10px 14px !important;
+    min-height: 52px;
+  }
+
+  /* Charts area scrolls within the remaining space above bottom nav */
+  .charts-area {
+    flex: 1;
+    overflow-y: auto;
+    overflow-x: hidden;
+    -webkit-overflow-scrolling: touch;
+    padding: 8px 6px 4px !important;
+    gap: 12px !important;
+    padding-bottom: 72px !important;
+  }
+
+  /* Tighter chart container padding on mobile */
+  .chart-container { padding: 12px 10px !important; }
+
+  /* Legend items smaller on mobile */
+  .clickable-legend { gap: 4px !important; }
+  .legend-item { padding: 3px 7px 3px 5px !important; font-size: 11px !important; }
+
+  /* Show mobile header logo */
+  .main-header-logo { display: inline !important; }
+  .main-header-logo-img { display: inline-block !important; }
+
+  /* Show league switcher in header on mobile */
+  .mobile-league-switcher { display: flex !important; }
+
+  /* Hide events badge on mobile (saves space) */
+  .desktop-only { display: none !important; }
+  .main-title { font-size: 16px; }
+
+  /* Show add/theme buttons in header */
+  .mobile-add-btn { display: inline-flex !important; }
+
+  /* Show the bottom nav */
+  .mobile-bottom-nav { display: flex !important; }
+
+  /* Overview: single column */
+  .overview-stack { gap: 14px; }
+  .standings-two-col { grid-template-columns: 1fr; }
+  .pp-charts-row { grid-template-columns: 1fr; }
+
+  /* Modals: full width, slide from bottom */
+  .pp-modal, .modal, .modal-wide {
+    width: 100vw !important;
+    border-radius: 16px 16px 0 0 !important;
+    max-height: 92svh;
+  }
+  .modal-overlay {
+    align-items: flex-end !important;
+    padding: 0 !important;
+  }
+
+  /* All tables scroll horizontally */
+  .wpc-table-wrap, .sc-table-wrap, .bump-table-wrap,
+  .pp-scorecard-wrap, .hs-table-wrap {
+    overflow-x: auto;
+    -webkit-overflow-scrolling: touch;
+  }
+
+  /* Bigger touch targets */
+  .icon-btn { width: 38px; height: 38px; }
+
+  /* Compact stat cards on small screens */
+  .pp-stats-row { gap: 8px; }
+  .pp-stat-card { min-width: 76px; padding: 8px 10px; }
+  .pp-stat-value { font-size: 18px; }
+}
+
+  /* Bigger touch targets */
+  .nav-item, .mobile-nav-item { min-height: 44px; }
+  .icon-btn { width: 36px; height: 36px; }
+
+  /* Compact stat cards */
+  .pp-stats-row { gap: 8px; }
+  .pp-stat-card { min-width: 80px; padding: 8px 10px; }
+  .pp-stat-value { font-size: 18px; }
+}
+
