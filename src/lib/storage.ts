@@ -4,6 +4,7 @@ const STORAGE_KEY    = 'golf_tracker_data';
 const COURSE_KEY     = 'golf_tracker_course';
 const PLAYERS_KEY    = 'golf_tracker_players';
 const HIDDEN_EVT_KEY = 'golf_tracker_hidden_events';
+const REMOTE_EXPORTED_AT_KEY = 'golf_tracker_remote_exported_at';
 const ACTIVE_LEAGUE_KEY = 'golf_tracker_active_league';
 const LEAGUE_REGISTRY_KEY = 'golf_tracker_league_registry';
 const COURSE_LIBRARY_KEY = 'golf_tracker_course_library';
@@ -228,6 +229,26 @@ export function loadHiddenEventIdsById(id: string): Set<string> {
 export function saveHiddenEventIdsById(id: string, ids: Set<string>): void {
   localStorage.setItem(lk(id, 'hidden'), JSON.stringify([...ids]));
   if (id === '2026') localStorage.setItem(HIDDEN_EVT_KEY, JSON.stringify([...ids]));
+}
+
+export function loadLastRemoteExportedAtById(id: string): string | null {
+  try {
+    const raw = localStorage.getItem(lk(id, 'remote_exported_at'));
+    if (raw) return raw;
+
+    if (id === '2026') {
+      return localStorage.getItem(REMOTE_EXPORTED_AT_KEY);
+    }
+  } catch {
+    // ignore malformed storage
+  }
+
+  return null;
+}
+
+export function saveLastRemoteExportedAtById(id: string, exportedAt: string): void {
+  localStorage.setItem(lk(id, 'remote_exported_at'), exportedAt);
+  if (id === '2026') localStorage.setItem(REMOTE_EXPORTED_AT_KEY, exportedAt);
 }
 
 // Async: load a league snapshot from the shared remote repo first, then fall

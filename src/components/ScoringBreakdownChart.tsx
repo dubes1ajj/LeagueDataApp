@@ -8,6 +8,7 @@ import { Edit2 } from 'lucide-react';
 import { useChartColors } from '../lib/useChartColors';
 import { getPlayerColor } from '../lib/colors';
 import { buildDisplayNames } from '../lib/displayNames';
+import { getTooltipTrigger } from '../lib/tooltip';
 import { useIsMobile } from '../lib/useIsMobile';
 
 interface ScoringBreakdownProps {
@@ -43,6 +44,7 @@ interface RowData {
 export default memo(function ScoringBreakdownChart({ events, courseConfig, onSetupCourse }: ScoringBreakdownProps) {
   const c = useChartColors();
   const isMobile = useIsMobile();
+  const tooltipTrigger = getTooltipTrigger(isMobile);
   type SortKey = 'name' | 'totalHoles' | 'totalPoints' | 'eagles' | 'birdies' | 'pars' | 'bogeys' | 'doubleBogeys' | 'tripleBogeys' | 'other';
   const [sortKey, setSortKey] = useState<SortKey>('totalPoints');
   const [sortAsc, setSortAsc] = useState(false);
@@ -173,6 +175,7 @@ export default memo(function ScoringBreakdownChart({ events, courseConfig, onSet
                 tick={{ fill: c.tick, fontSize: isMobile ? 10 : 12 }}
               />
               <Tooltip
+                trigger={tooltipTrigger}
                 contentStyle={{ background: c.tooltipBg, border: `1px solid ${c.border}`, borderRadius: 8 }}
                 labelStyle={{ color: c.text2, fontWeight: 700 }}
                 formatter={(val, key) => {

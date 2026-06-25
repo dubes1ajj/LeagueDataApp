@@ -8,6 +8,7 @@ import { useLineSelect } from '../lib/useLineHover';
 import { ChartTooltip } from './ChartTooltip';
 import { ClickableLegend } from './ClickableLegend';
 import { useChartColors } from '../lib/useChartColors';
+import { getTooltipTrigger } from '../lib/tooltip';
 import { useIsMobile } from '../lib/useIsMobile';
 
 interface HandicapTrendProps {
@@ -34,6 +35,7 @@ export default memo(function HandicapTrendChart({ events, topN = 12 }: HandicapT
   const { selected, toggle, clearAll, getLineProps } = useLineSelect(topPlayers);
   const c = useChartColors();
   const isMobile = useIsMobile();
+  const tooltipTrigger = getTooltipTrigger(isMobile);
 
   const chartData = useMemo(() => {
     return sorted.map(ev => {
@@ -71,7 +73,7 @@ export default memo(function HandicapTrendChart({ events, topN = 12 }: HandicapT
           <YAxis stroke={c.axis} tick={{ fill: c.tick, fontSize: 12 }}
             label={isMobile ? undefined : { value: 'Handicap', angle: -90, position: 'insideLeft', fill: c.tick, fontSize: 12 }}
           />
-          <Tooltip content={<ChartTooltip selected={selected} sortDir="asc" />} />
+          <Tooltip trigger={tooltipTrigger} content={<ChartTooltip selected={selected} sortDir="asc" />} />
           {topPlayers.map(player => (
             <Line
               key={player}

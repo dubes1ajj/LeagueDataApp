@@ -8,6 +8,7 @@ import { useLineSelect } from '../lib/useLineHover';
 import { ChartTooltip } from './ChartTooltip';
 import { ClickableLegend } from './ClickableLegend';
 import { useChartColors } from '../lib/useChartColors';
+import { getTooltipTrigger } from '../lib/tooltip';
 import { useIsMobile } from '../lib/useIsMobile';
 
 interface GrossNetScoresProps {
@@ -35,6 +36,7 @@ export default memo(function GrossNetScoresChart({ events, scoreType = 'net', to
   const { selected, toggle, clearAll, getLineProps } = useLineSelect(topPlayers);
   const c = useChartColors();
   const isMobile = useIsMobile();
+  const tooltipTrigger = getTooltipTrigger(isMobile);
 
   const chartData = useMemo(() => {
     return sorted.map(ev => {
@@ -76,7 +78,7 @@ export default memo(function GrossNetScoresChart({ events, scoreType = 'net', to
             label={isMobile ? undefined : { value: label, angle: -90, position: 'insideLeft', fill: c.tick, fontSize: 11 }}
             domain={(['dataMin - 2', 'dataMax + 2'] as [string, string])}
           />
-          <Tooltip content={<ChartTooltip selected={selected} sortDir="asc" />} />
+          <Tooltip trigger={tooltipTrigger} content={<ChartTooltip selected={selected} sortDir="asc" />} />
           {topPlayers.map(player => (
             <Line
               key={player}

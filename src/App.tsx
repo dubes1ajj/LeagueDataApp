@@ -5,6 +5,7 @@ import {
   loadCourseConfigById, saveCourseConfigById,
   loadPlayerConfigById, savePlayerConfigById,
   loadHiddenEventIdsById, saveHiddenEventIdsById,
+  loadLastRemoteExportedAtById, saveLastRemoteExportedAtById,
   fetchLeagueSnapshot, addEvent, removeEvent, applyAutoHide,
 } from './lib/storage';
 import type { BuiltInLeague, LeagueSnapshot } from './lib/storage';
@@ -105,28 +106,53 @@ export default function App() {
       let playerData = loadPlayerConfigById(activeLeagueId);
       const hiddenData = loadHiddenEventIdsById(activeLeagueId);
 
-      if (!leagueData) {
-        const snap = await fetchLeagueSnapshot(activeLeagueId);
-        if (snap && !cancelled) {
-          leagueData = {
-            ...snap.league,
-            events: snap.league.events.map(e => {
-              if (!e.nineHoles) return { ...e, nineHoles: 'front' as const };
-              return e;
-            }),
-          };
-          courseData = snap.courseConfig;
-          playerData = applyAutoHide(snap.playerConfig, leagueData.events);
-          const recalculated = { ...leagueData, events: recalculateCumulativeStandings(leagueData.events) };
-          saveLeagueDataById(activeLeagueId, recalculated);
-          if (courseData) saveCourseConfigById(activeLeagueId, courseData);
-          savePlayerConfigById(activeLeagueId, playerData);
-          leagueData = recalculated;
-        }
-      } else {
+      if (leagueData) {
         leagueData = { ...leagueData, events: recalculateCumulativeStandings(leagueData.events) };
         saveLeagueDataById(activeLeagueId, leagueData);
         playerData = applyAutoHide(playerData, leagueData.events);
+      }
+
+      const snap = await fetchLeagueSnapshot(activeLeagueId);
+      if (snap && !cancelled) {
+        const remoteLeague = {
+          ...snap.league,
+          events: snap.league.events.map(e => {
+            if (!e.nineHoles) return { ...e, nineHoles: 'front' as const };
+            return e;
+          }),
+        };
+        const recalculatedRemote = { ...remoteLeague, events: recalculateCumulativeStandings(remoteLeague.events) };
+        const remoteExportedAt = typeof snap.exportedAt === 'string' ? snap.exportedAt : null;
+        const lastRemoteExportedAt = loadLastRemoteExportedAtById(activeLeagueId);
+
+        const remoteTs = remoteExportedAt ? Date.parse(remoteExportedAt) : Number.NaN;
+        const lastRemoteTs = lastRemoteExportedAt ? Date.parse(lastRemoteExportedAt) : Number.NaN;
+
+        const localMaxEventNumber = leagueData
+          ? leagueData.events.reduce((max, event) => Math.max(max, event.eventNumber), 0)
+          : 0;
+        const remoteMaxEventNumber = recalculatedRemote.events.reduce((max, event) => Math.max(max, event.eventNumber), 0);
+
+        const remoteClearlyAhead = !leagueData
+          || recalculatedRemote.events.length > leagueData.events.length
+          || remoteMaxEventNumber > localMaxEventNumber;
+
+        const remoteIsNewerByTimestamp = Number.isFinite(remoteTs)
+          && (
+            (!Number.isFinite(lastRemoteTs) && !!remoteExportedAt)
+            || remoteTs > lastRemoteTs
+          );
+
+        if (!leagueData || remoteIsNewerByTimestamp || remoteClearlyAhead) {
+          leagueData = recalculatedRemote;
+          courseData = snap.courseConfig;
+          playerData = applyAutoHide(snap.playerConfig, leagueData.events);
+
+          saveLeagueDataById(activeLeagueId, leagueData);
+          if (courseData) saveCourseConfigById(activeLeagueId, courseData);
+          savePlayerConfigById(activeLeagueId, playerData);
+          if (remoteExportedAt) saveLastRemoteExportedAtById(activeLeagueId, remoteExportedAt);
+        }
       }
 
       if (!cancelled && leagueData) {
@@ -134,6 +160,9 @@ export default function App() {
         setCourseConfig(courseData ?? null);
         setPlayerConfig(playerData);
         setHiddenEventIds(hiddenData);
+      }
+
+      if (!cancelled) {
         setLeagueLoading(false);
       }
     }
@@ -264,6 +293,17 @@ export default function App() {
   }, []);
 
   const events = league.events;
+  const activePlayerNames = useMemo(() => {
+    const seen = new Set<string>();
+    for (const ev of events) {
+      for (const player of ev.players) {
+        if (playerConfig.active[player.playerName] !== false) {
+          seen.add(player.playerName);
+        }
+      }
+    }
+    return Array.from(seen).sort((a, b) => a.localeCompare(b));
+  }, [events, playerConfig]);
   const visibleEvents = useMemo(() => events.filter(e => !hiddenEventIds.has(e.id)), [events, hiddenEventIds]);
   const filteredEvents = useFilteredEvents(visibleEvents, playerConfig);
   const filteredEventIds = useMemo(() => filteredEvents.map((event) => event.id), [filteredEvents]);
@@ -430,7 +470,7 @@ export default function App() {
         </div>
       </main>
 
-      {isAdmin && showModal && <AddEventModal onClose={() => setShowModal(false)} onAdd={handleAddEvent} />}
+      {isAdmin && showModal && <AddEventModal onClose={() => setShowModal(false)} onAdd={handleAddEvent} courseConfig={courseConfig} activePlayerNames={activePlayerNames} />}
       {isAdmin && showCourseModal && <CourseConfigModal initial={courseConfig} onSave={handleSaveCourse} onClose={() => setShowCourseModal(false)} />}
       {showAdminModal && <AdminUnlockModal onUnlock={(pin) => { const ok = tryUnlock(pin); if (ok) setShowAdminModal(false); return ok; }} onClose={() => setShowAdminModal(false)} />}
       {holeProfile && <HoleProfileModal holeNum={holeProfile.holeNum} nine={holeProfile.nine} events={filteredEvents} courseConfig={courseConfig} onClose={() => setHoleProfile(null)} />}

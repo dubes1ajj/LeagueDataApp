@@ -8,6 +8,7 @@ import { useLineSelect } from '../lib/useLineHover';
 import { ChartTooltip } from './ChartTooltip';
 import { ClickableLegend } from './ClickableLegend';
 import { useChartColors } from '../lib/useChartColors';
+import { getTooltipTrigger } from '../lib/tooltip';
 import { useIsMobile } from '../lib/useIsMobile';
 
 interface CumulativePointsProps {
@@ -34,6 +35,7 @@ export default memo(function CumulativePointsChart({ events, topN = 999 }: Cumul
   const { selected, toggle, clearAll, getLineProps } = useLineSelect(topPlayers);
   const c = useChartColors();
   const isMobile = useIsMobile();
+  const tooltipTrigger = getTooltipTrigger(isMobile);
 
   const chartData = useMemo(() => {
     return sorted.map(ev => {
@@ -71,7 +73,7 @@ export default memo(function CumulativePointsChart({ events, topN = 999 }: Cumul
           <YAxis stroke={c.axis} tick={{ fill: c.tick, fontSize: 12 }}
             label={isMobile ? undefined : { value: 'Points', angle: -90, position: 'insideLeft', fill: c.tick, fontSize: 12 }}
           />
-          <Tooltip content={<ChartTooltip selected={selected} sortDir="desc" />} />
+          <Tooltip trigger={tooltipTrigger} content={<ChartTooltip selected={selected} sortDir="desc" />} />
           {topPlayers.map((player) => {
             const color = getPlayerColor(player);
             const lineProps = getLineProps(player, color);

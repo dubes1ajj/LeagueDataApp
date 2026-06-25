@@ -8,6 +8,7 @@ import { useChartColors } from '../lib/useChartColors';
 import { getPlayerColor } from '../lib/colors';
 import { buildDisplayNames } from '../lib/displayNames';
 import { computeBreakdown, getParsForNine } from '../lib/scoring';
+import { getTooltipTrigger } from '../lib/tooltip';
 import { useIsMobile } from '../lib/useIsMobile';
 
 interface WeeklyRecapPageProps {
@@ -78,6 +79,7 @@ function getChaosGradientColor(value: number, minValue: number, maxValue: number
 export default memo(function WeeklyRecapPage({ events, courseConfig }: WeeklyRecapPageProps) {
   const c = useChartColors();
   const isMobile = useIsMobile();
+  const tooltipTrigger = getTooltipTrigger(isMobile);
   const recaps = useMemo(() => buildWeeklyRecaps(events, courseConfig), [events, courseConfig]);
   const [eventNumber, setEventNumber] = useState<number | null>(() => recaps.at(-1)?.eventNumber ?? null);
   const sortedEvents = useMemo(() => [...events].sort((a, b) => a.eventNumber - b.eventNumber), [events]);
@@ -335,6 +337,41 @@ export default memo(function WeeklyRecapPage({ events, courseConfig }: WeeklyRec
     ];
   }, [activePlayers.length, event]);
 
+  const weeklyScorecardRows = useMemo(() => {
+    if (!event) return [] as Array<{
+      playerName: string;
+      displayName: string;
+      place: number;
+      holes: (number | null)[];
+      grossScore: number | null;
+      netScore: number | null;
+      points: number;
+    }>;
+
+    return [...activePlayers]
+      .sort((a, b) => b.points - a.points || (a.netScore ?? Number.POSITIVE_INFINITY) - (b.netScore ?? Number.POSITIVE_INFINITY) || a.playerName.localeCompare(b.playerName))
+      .map((player, index) => ({
+        playerName: player.playerName,
+        displayName: displayNames[player.playerName] ?? player.playerName.split(',')[0],
+        place: player.position || index + 1,
+        holes: player.holes,
+        grossScore: player.grossScore,
+        netScore: player.netScore,
+        points: player.points,
+      }));
+  }, [activePlayers, displayNames, event]);
+
+  const scorecardHoleHeaders = useMemo(() => {
+    if (!event) return [] as number[];
+    const startHole = event.nineHoles === 'back' ? 10 : 1;
+    return Array.from({ length: 9 }, (_, index) => startHole + index);
+  }, [event]);
+
+  const scorecardPars = useMemo(() => {
+    if (!event || !courseConfig) return null;
+    return getParsForNine(courseConfig, event.nineHoles);
+  }, [courseConfig, event]);
+
   const leaderChartData = useMemo(() => pointsLeaderboard.slice(0, 5), [pointsLeaderboard]);
 
   const strugglerChartData = useMemo(() => {
@@ -435,6 +472,63 @@ export default memo(function WeeklyRecapPage({ events, courseConfig }: WeeklyRec
         </div>
       </div>
 
+      <div className="recap-scoreboard-card recap-chart-card">
+        <p className="pp-chart-label">Weekly score sheet</p>
+        <div className="pp-scorecard-wrap">
+          <table className="pp-scorecard">
+            <thead>
+              <tr>
+                <th className="pp-sc-label">Player</th>
+                {scorecardHoleHeaders.map((hole) => <th key={hole} className="pp-sc-hole">#{hole}</th>)}
+                <th className="pp-sc-total">Gross</th>
+                <th className="pp-sc-total">Net</th>
+                <th className="pp-sc-total">Pts</th>
+              </tr>
+            </thead>
+            <tbody>
+              {scorecardPars && (
+                <tr>
+                  <th className="pp-sc-label pp-sc-par-row">Par</th>
+                  {scorecardPars.map((par, index) => <th key={index} className="pp-sc-hole pp-sc-par-cell">{par}</th>)}
+                  <th className="pp-sc-total pp-sc-par-cell">{scorecardPars.reduce((sum, par) => sum + par, 0)}</th>
+                  <th className="pp-sc-total pp-sc-par-cell">-</th>
+                  <th className="pp-sc-total pp-sc-par-cell">-</th>
+                </tr>
+              )}
+              {weeklyScorecardRows.map((player) => (
+                <tr key={player.playerName} className="pp-sc-row">
+                  <td className="pp-sc-label">{player.displayName}</td>
+                  {player.holes.map((score, index) => {
+                    const par = scorecardPars ? scorecardPars[index] : null;
+                    const diff = score !== null && par !== null ? score - par : null;
+                    const cls = diff === null ? ''
+                      : diff <= -2 ? 'pp-sc-eagle'
+                      : diff === -1 ? 'pp-sc-birdie'
+                      : diff === 0 ? 'pp-sc-par'
+                      : diff === 1 ? 'pp-sc-bogey'
+                      : diff === 2 ? 'pp-sc-dbl'
+                      : 'pp-sc-trpl';
+
+                    return (
+                      <td
+                        key={`${player.playerName}-${index}`}
+                        className={`pp-sc-hole-cell ${cls}`}
+                        title={`Hole ${scorecardHoleHeaders[index]}${par ? ` · Par ${par}` : ''}`}
+                      >
+                        {score ?? '—'}
+                      </td>
+                    );
+                  })}
+                  <td className="pp-sc-total">{player.grossScore ?? '—'}</td>
+                  <td className="pp-sc-total">{player.netScore ?? '—'}</td>
+                  <td className="pp-sc-total pp-sc-pts">{player.points}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      </div>
+
       <div className="pp-section-title">Round Leaders</div>
       <div className="recap-chart-card recap-inline-chart-card">
         <p className="pp-chart-label">Points leaderboard</p>
@@ -444,6 +538,7 @@ export default memo(function WeeklyRecapPage({ events, courseConfig }: WeeklyRec
             <XAxis type="number" stroke={c.axis} tick={{ fill: c.tick, fontSize: 11 }} />
             <YAxis dataKey="shortName" type="category" stroke={c.axis} tick={{ fill: c.tick, fontSize: 11 }} width={isMobile ? 68 : 80} />
             <Tooltip
+              trigger={tooltipTrigger}
               contentStyle={{ background: c.tooltipBg, border: `1px solid ${c.border}`, borderRadius: 8 }}
               labelStyle={{ color: c.text2 }}
               formatter={(value, name, entry: { payload?: { netScore: number | null; grossScore: number | null } }) => {
@@ -493,6 +588,7 @@ export default memo(function WeeklyRecapPage({ events, courseConfig }: WeeklyRec
             <XAxis type="number" stroke={c.axis} tick={{ fill: c.tick, fontSize: 11 }} />
             <YAxis dataKey="displayName" type="category" stroke={c.axis} tick={{ fill: c.tick, fontSize: 11 }} width={isMobile ? 68 : 80} />
             <Tooltip
+              trigger={tooltipTrigger}
               contentStyle={{ background: c.tooltipBg, border: `1px solid ${c.border}`, borderRadius: 8 }}
               labelStyle={{ color: c.text2 }}
               formatter={(value, name, entry: { payload?: { netScore: number | null } }) => {
@@ -546,6 +642,7 @@ export default memo(function WeeklyRecapPage({ events, courseConfig }: WeeklyRec
               <XAxis dataKey="hole" stroke={c.axis} tick={{ fill: c.tick, fontSize: 11 }} />
               <YAxis stroke={c.axis} tick={{ fill: c.tick, fontSize: 11 }} />
               <Tooltip
+                trigger={tooltipTrigger}
                 contentStyle={{ background: c.tooltipBg, border: `1px solid ${c.border}`, borderRadius: 8 }}
                 labelStyle={{ color: c.text2 }}
                 formatter={(value, name, entry: { payload?: { avgScore: number | null; par: number } }) => {
@@ -609,6 +706,7 @@ export default memo(function WeeklyRecapPage({ events, courseConfig }: WeeklyRec
             <XAxis type="number" stroke={c.axis} tick={{ fill: c.tick, fontSize: 11 }} />
             <YAxis dataKey="displayName" type="category" stroke={c.axis} tick={{ fill: c.tick, fontSize: 11 }} width={isMobile ? 68 : 80} />
             <Tooltip
+              trigger={tooltipTrigger}
               contentStyle={{ background: c.tooltipBg, border: `1px solid ${c.border}`, borderRadius: 8 }}
               labelStyle={{ color: c.text2 }}
               formatter={(value, name, entry: { payload?: { volatility: number } }) => {

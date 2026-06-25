@@ -7,6 +7,7 @@ import type { EventData } from '../types/golf';
 import { getPlayerColor } from '../lib/colors';
 import { useChartColors } from '../lib/useChartColors';
 import { buildDisplayNames } from '../lib/displayNames';
+import { getTooltipTrigger } from '../lib/tooltip';
 import { useIsMobile } from '../lib/useIsMobile';
 
 // ─── Types ───────────────────────────────────────────────────────────────────
@@ -21,6 +22,7 @@ export default memo(function WeeklyPointsChart({ events }: WeeklyPointsChartProp
   const [sortKey, setSortKey] = useState<SortKey>('total');
   const c = useChartColors();
   const isMobile = useIsMobile();
+  const tooltipTrigger = getTooltipTrigger(isMobile);
 
   // Read theme text color once for cell styling
   const isDark = !document.documentElement.classList.contains('light');
@@ -231,6 +233,7 @@ export default memo(function WeeklyPointsChart({ events }: WeeklyPointsChartProp
               tick={{ fill: c.tick, fontSize: isMobile ? 10 : 12 }}
             />
             <Tooltip
+              trigger={tooltipTrigger}
               contentStyle={{ background: c.tooltipBg, border: `1px solid ${c.border}`, borderRadius: 8 }}
               labelStyle={{ color: c.text2, fontWeight: 700 }}
               formatter={(val, key) => {

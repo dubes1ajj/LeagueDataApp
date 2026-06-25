@@ -9,6 +9,7 @@ import { getPlayerColor } from '../lib/colors';
 import { useChartColors } from '../lib/useChartColors';
 import { buildDisplayNames } from '../lib/displayNames';
 import { computeBreakdown, getParsForNine } from '../lib/scoring';
+import { getTooltipTrigger } from '../lib/tooltip';
 import { useIsMobile } from '../lib/useIsMobile';
 
 interface ComparePlayersPanelProps {
@@ -19,6 +20,7 @@ interface ComparePlayersPanelProps {
 export default memo(function ComparePlayersPanel({ events, courseConfig }: ComparePlayersPanelProps) {
   const c = useChartColors();
   const isMobile = useIsMobile();
+  const tooltipTrigger = getTooltipTrigger(isMobile);
 
   const players = useMemo(() => {
     const set = new Set<string>();
@@ -202,7 +204,7 @@ export default memo(function ComparePlayersPanel({ events, courseConfig }: Compa
                   <CartesianGrid strokeDasharray="3 3" stroke={c.grid} />
                   <XAxis dataKey="event" stroke={c.axis} tick={{ fill: c.tick, fontSize: 11 }} />
                   <YAxis stroke={c.axis} tick={{ fill: c.tick, fontSize: 11 }} />
-                  <Tooltip contentStyle={{ background: c.tooltipBg, border: `1px solid ${c.border}`, borderRadius: 8 }} labelStyle={{ color: c.text2 }} />
+                  <Tooltip trigger={tooltipTrigger} contentStyle={{ background: c.tooltipBg, border: `1px solid ${c.border}`, borderRadius: 8 }} labelStyle={{ color: c.text2 }} />
                   {selected.map(name => (
                     <Line key={name} type="linear" dataKey={`${name}:cum`} name={displayNames[name] ?? name} stroke={getPlayerColor(name)} strokeWidth={2.5} dot={{ r: 3, fill: getPlayerColor(name) }} connectNulls />
                   ))}
@@ -216,7 +218,7 @@ export default memo(function ComparePlayersPanel({ events, courseConfig }: Compa
                   <CartesianGrid strokeDasharray="3 3" stroke={c.grid} />
                   <XAxis dataKey="event" stroke={c.axis} tick={{ fill: c.tick, fontSize: 11 }} />
                   <YAxis stroke={c.axis} tick={{ fill: c.tick, fontSize: 11 }} domain={['dataMin - 2', 'dataMax + 2']} />
-                  <Tooltip contentStyle={{ background: c.tooltipBg, border: `1px solid ${c.border}`, borderRadius: 8 }} labelStyle={{ color: c.text2 }} />
+                  <Tooltip trigger={tooltipTrigger} contentStyle={{ background: c.tooltipBg, border: `1px solid ${c.border}`, borderRadius: 8 }} labelStyle={{ color: c.text2 }} />
                   {selected.map(name => (
                     <Line key={name} type="linear" dataKey={`${name}:net`} name={displayNames[name] ?? name} stroke={getPlayerColor(name)} strokeWidth={2.5} dot={{ r: 3, fill: getPlayerColor(name) }} connectNulls />
                   ))}
@@ -233,7 +235,7 @@ export default memo(function ComparePlayersPanel({ events, courseConfig }: Compa
                   <CartesianGrid strokeDasharray="3 3" stroke={c.grid} />
                   <XAxis dataKey="event" stroke={c.axis} tick={{ fill: c.tick, fontSize: 11 }} />
                   <YAxis stroke={c.axis} tick={{ fill: c.tick, fontSize: 11 }} domain={['dataMin - 1', 'dataMax + 1']} />
-                  <Tooltip contentStyle={{ background: c.tooltipBg, border: `1px solid ${c.border}`, borderRadius: 8 }} labelStyle={{ color: c.text2 }} />
+                  <Tooltip trigger={tooltipTrigger} contentStyle={{ background: c.tooltipBg, border: `1px solid ${c.border}`, borderRadius: 8 }} labelStyle={{ color: c.text2 }} />
                   {selected.map(name => (
                     <Line key={name} type="linear" dataKey={`${name}:hcp`} name={displayNames[name] ?? name} stroke={getPlayerColor(name)} strokeWidth={2.5} dot={{ r: 3, fill: getPlayerColor(name) }} connectNulls />
                   ))}
@@ -247,7 +249,7 @@ export default memo(function ComparePlayersPanel({ events, courseConfig }: Compa
                   <CartesianGrid strokeDasharray="3 3" stroke={c.grid} />
                   <XAxis type="number" stroke={c.axis} tick={{ fill: c.tick, fontSize: 11 }} domain={[0, 100]} />
                   <YAxis dataKey="player" type="category" stroke={c.axis} tick={{ fill: c.tick, fontSize: 11 }} width={isMobile ? 68 : 84} />
-                  <Tooltip contentStyle={{ background: c.tooltipBg, border: `1px solid ${c.border}`, borderRadius: 8 }} labelStyle={{ color: c.text2 }} />
+                  <Tooltip trigger={tooltipTrigger} contentStyle={{ background: c.tooltipBg, border: `1px solid ${c.border}`, borderRadius: 8 }} labelStyle={{ color: c.text2 }} />
                   <Bar dataKey="birdies" stackId="a" fill="#22c55e" radius={[8, 0, 0, 8]} />
                   <Bar dataKey="pars" stackId="a" fill="#4f8ef7" />
                   <Bar dataKey="bogeysOrWorse" stackId="a" fill="#f97316" radius={[0, 8, 8, 0]} />
@@ -293,7 +295,7 @@ export default memo(function ComparePlayersPanel({ events, courseConfig }: Compa
                     strokeWidth={2}
                   />
                 ))}
-                <Tooltip contentStyle={{ background: c.tooltipBg, border: `1px solid ${c.border}`, borderRadius: 8 }} labelStyle={{ color: c.text2 }} />
+                <Tooltip trigger={tooltipTrigger} contentStyle={{ background: c.tooltipBg, border: `1px solid ${c.border}`, borderRadius: 8 }} labelStyle={{ color: c.text2 }} />
               </RadarChart>
             </ResponsiveContainer>
           </div>
