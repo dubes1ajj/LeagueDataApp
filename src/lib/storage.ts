@@ -1,8 +1,22 @@
-import type { LeagueData, EventData, CourseConfig, PlayerConfig } from '../types/golf';
+import type { LeagueData, EventData, CourseConfig, PlayerConfig, ColorSchemeConfig } from '../types/golf';
+import { DEFAULT_EVENT_DATE_DISPLAY } from './eventDateDisplay';
+
+const DEFAULT_ADJUSTED_SCORING = {
+  mode: 'none' as const,
+  dropCount: 0,
+};
+
+const DEFAULT_WEATHER_SETTINGS = {
+  locationName: '',
+  latitude: null,
+  longitude: null,
+  playTime: '17:00',
+};
 
 const STORAGE_KEY    = 'golf_tracker_data';
 const COURSE_KEY     = 'golf_tracker_course';
 const PLAYERS_KEY    = 'golf_tracker_players';
+const COLORS_KEY     = 'golf_tracker_colors';
 const HIDDEN_EVT_KEY = 'golf_tracker_hidden_events';
 const REMOTE_EXPORTED_AT_KEY = 'golf_tracker_remote_exported_at';
 const ACTIVE_LEAGUE_KEY = 'golf_tracker_active_league';
@@ -44,7 +58,13 @@ export function getLatestLeagueId(leagues: ReadonlyArray<Pick<BuiltInLeague, 'id
 }
 
 export async function fetchAvailableLeagues(): Promise<BuiltInLeague[]> {
-  const localLeagues = loadLeagueRegistry().map((id) => ({ id, name: formatLeagueName(id) }));
+  const localLeagues = loadLeagueRegistry().map((id) => {
+    const storedLeague = loadLeagueDataById(id);
+    return {
+      id,
+      name: storedLeague?.leagueName?.trim() || formatLeagueName(id),
+    };
+  });
   try {
     const res = await fetch(REMOTE_DATA_REPO_API_URL, { cache: 'no-store' });
     if (!res.ok) throw new Error(`HTTP ${res.status}`);
@@ -113,9 +133,41 @@ export function registerLeagueId(id: string): void {
   saveLeagueRegistry([...current, id]);
 }
 
+export function deleteLeagueById(id: string): void {
+  const keys = [
+    lk(id, 'data'),
+    lk(id, 'course'),
+    lk(id, 'players'),
+    lk(id, 'colors'),
+    lk(id, 'hidden'),
+    lk(id, 'remote_exported_at'),
+  ];
+  for (const key of keys) localStorage.removeItem(key);
+
+  if (id === '2026') {
+    localStorage.removeItem(STORAGE_KEY);
+    localStorage.removeItem(COURSE_KEY);
+    localStorage.removeItem(PLAYERS_KEY);
+    localStorage.removeItem(COLORS_KEY);
+    localStorage.removeItem(HIDDEN_EVT_KEY);
+    localStorage.removeItem(REMOTE_EXPORTED_AT_KEY);
+  }
+
+  const registry = loadLeagueRegistry().filter((entry) => entry !== id);
+  saveLeagueRegistry(registry);
+}
+
 function migrateEvents(data: LeagueData): LeagueData {
   return {
     ...data,
+    handicapMode: data.handicapMode ?? 'general',
+    adjustedScoring: {
+      ...DEFAULT_ADJUSTED_SCORING,
+      ...(data.adjustedScoring ?? {}),
+      dropCount: Math.max(0, Math.floor(data.adjustedScoring?.dropCount ?? 0)),
+    },
+    eventDateDisplay: { ...DEFAULT_EVENT_DATE_DISPLAY, ...(data.eventDateDisplay ?? {}) },
+    weatherSettings: { ...DEFAULT_WEATHER_SETTINGS, ...(data.weatherSettings ?? {}) },
     events: data.events.map(e => {
       if (!e.nineHoles) return { ...e, nineHoles: 'front' as const };
       return e;
@@ -214,6 +266,39 @@ export function savePlayerConfigById(id: string, config: PlayerConfig): void {
   if (id === '2026') localStorage.setItem(PLAYERS_KEY, JSON.stringify(config));
 }
 
+export function loadColorSchemeById(id: string): ColorSchemeConfig {
+  try {
+    const raw = localStorage.getItem(lk(id, 'colors'));
+    if (raw) {
+      const parsed = JSON.parse(raw) as Partial<ColorSchemeConfig>;
+      return {
+        playerColors: parsed.playerColors ?? {},
+        eventColors: parsed.eventColors ?? {},
+        themeColors: parsed.themeColors ?? {},
+      };
+    }
+    if (id === '2026') {
+      const legacyRaw = localStorage.getItem(COLORS_KEY);
+      if (legacyRaw) {
+        const parsed = JSON.parse(legacyRaw) as Partial<ColorSchemeConfig>;
+        return {
+          playerColors: parsed.playerColors ?? {},
+          eventColors: parsed.eventColors ?? {},
+          themeColors: parsed.themeColors ?? {},
+        };
+      }
+    }
+  } catch {
+    // ignore malformed storage
+  }
+  return { playerColors: {}, eventColors: {}, themeColors: {} };
+}
+
+export function saveColorSchemeById(id: string, config: ColorSchemeConfig): void {
+  localStorage.setItem(lk(id, 'colors'), JSON.stringify(config));
+  if (id === '2026') localStorage.setItem(COLORS_KEY, JSON.stringify(config));
+}
+
 export function loadHiddenEventIdsById(id: string): Set<string> {
   try {
     const raw = localStorage.getItem(lk(id, 'hidden'));
@@ -282,6 +367,9 @@ export function loadLeagueData(): LeagueData {
     const raw = localStorage.getItem(STORAGE_KEY);
     if (raw) {
       const data = JSON.parse(raw) as LeagueData;
+      data.handicapMode = data.handicapMode ?? 'general';
+      data.eventDateDisplay = { ...DEFAULT_EVENT_DATE_DISPLAY, ...(data.eventDateDisplay ?? {}) };
+      data.weatherSettings = { ...DEFAULT_WEATHER_SETTINGS, ...(data.weatherSettings ?? {}) };
       // Migrate old events that predate the nineHoles field
       data.events = data.events.map(e => {
         if (!e.nineHoles) return { ...e, nineHoles: 'front' as const };
@@ -292,7 +380,14 @@ export function loadLeagueData(): LeagueData {
   } catch {
     // corrupted data — start fresh
   }
-  return { leagueName: '2026 Guinness Cup', events: [] };
+  return {
+    leagueName: '2026 Guinness Cup',
+    handicapMode: 'general',
+    adjustedScoring: { ...DEFAULT_ADJUSTED_SCORING },
+    eventDateDisplay: { ...DEFAULT_EVENT_DATE_DISPLAY },
+    weatherSettings: { ...DEFAULT_WEATHER_SETTINGS },
+    events: [],
+  };
 }
 
 export function saveLeagueData(data: LeagueData): void {
@@ -402,6 +497,7 @@ export function parseSnapshotFile(file: File): Promise<LeagueSnapshot> {
           if (!ev.nineHoles) return { ...ev, nineHoles: 'front' as const };
           return ev;
         });
+        data.league.handicapMode = data.league.handicapMode ?? 'general';
         resolve(data);
       } catch {
         reject(new Error('Could not parse file — is it a valid Golf Tracker export?'));

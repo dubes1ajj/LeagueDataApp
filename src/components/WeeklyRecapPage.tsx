@@ -10,10 +10,14 @@ import { buildDisplayNames } from '../lib/displayNames';
 import { computeBreakdown, getParsForNine } from '../lib/scoring';
 import { getTooltipTrigger } from '../lib/tooltip';
 import { useIsMobile } from '../lib/useIsMobile';
+import { getEventDisplayName } from '../lib/eventNames';
+import { formatEventDateDisplay } from '../lib/eventDateDisplay';
 
 interface WeeklyRecapPageProps {
   events: EventData[];
   courseConfig: CourseConfig | null;
+  onPlayerClick?: (playerName: string) => void;
+  onHoleClick?: (holeNum: number, nine: 'front' | 'back') => void;
 }
 
 function formatPlayerNames(playerNames: string[]): string {
@@ -76,7 +80,7 @@ function getChaosGradientColor(value: number, minValue: number, maxValue: number
   return mixHexColors('#f59e0b', '#dc2626', (ratio - 0.5) * 2);
 }
 
-export default memo(function WeeklyRecapPage({ events, courseConfig }: WeeklyRecapPageProps) {
+export default memo(function WeeklyRecapPage({ events, courseConfig, onPlayerClick, onHoleClick }: WeeklyRecapPageProps) {
   const c = useChartColors();
   const isMobile = useIsMobile();
   const tooltipTrigger = getTooltipTrigger(isMobile);
@@ -85,10 +89,18 @@ export default memo(function WeeklyRecapPage({ events, courseConfig }: WeeklyRec
   const sortedEvents = useMemo(() => [...events].sort((a, b) => a.eventNumber - b.eventNumber), [events]);
 
   const recap = recaps.find(r => r.eventNumber === eventNumber) ?? recaps.at(-1) ?? null;
+  const eventNameByNumber = useMemo(() => {
+    const map = new Map<number, string>();
+    for (const item of events) {
+      map.set(item.eventNumber, getEventDisplayName(item));
+    }
+    return map;
+  }, [events]);
   const event = useMemo(
     () => (recap ? events.find(item => item.eventNumber === recap.eventNumber) ?? null : null),
     [events, recap]
   );
+  const recapNine = event?.nineHoles ?? 'front';
   const previousEvent = useMemo(() => {
     if (!event) return null;
     const eventIndex = sortedEvents.findIndex((item) => item.id === event.id);
@@ -171,15 +183,12 @@ export default memo(function WeeklyRecapPage({ events, courseConfig }: WeeklyRec
       const bogeysOrWorse = breakdown.bogeys + breakdown.doubleBogeys + breakdown.tripleBogeys + breakdown.other;
       const volatility = scores.length ? Math.max(...scores) - Math.min(...scores) : 0;
 
-      let worstVsPar = 0;
-      if (pars) {
-        worstVsPar = player.holes.reduce<number>((worst, score, holeIndex) => {
+      const worstVsPar = pars
+        ? player.holes.reduce<number>((worst, score, holeIndex) => {
           if (score === null || score === undefined) return worst;
           return Math.max(worst, score - pars[holeIndex]);
-        }, 0);
-      } else {
-        worstVsPar = scores.length ? Math.max(...scores) - Math.min(...scores) : 0;
-      }
+        }, 0)
+        : (scores.length ? Math.max(...scores) - Math.min(...scores) : 0);
 
       return {
         playerName: player.playerName,
@@ -361,6 +370,16 @@ export default memo(function WeeklyRecapPage({ events, courseConfig }: WeeklyRec
       }));
   }, [activePlayers, displayNames, event]);
 
+  function renderPlayerNames(playerNames: string[]) {
+    if (!playerNames.length) return '—';
+    const shortNames = playerNames.map((name) => displayNames[name] ?? name.split(',')[0]);
+    return formatPlayerNames(shortNames);
+  }
+
+  function renderHoleLabel(holeNum: number) {
+    return `Hole ${holeNum}`;
+  }
+
   const scorecardHoleHeaders = useMemo(() => {
     if (!event) return [] as number[];
     const startHole = event.nineHoles === 'back' ? 10 : 1;
@@ -442,7 +461,7 @@ export default memo(function WeeklyRecapPage({ events, courseConfig }: WeeklyRec
         >
           {recaps.map(r => (
             <option key={r.eventNumber} value={r.eventNumber}>
-              Event {r.eventNumber}{r.eventDate ? ` · ${r.eventDate}` : ''}
+              {eventNameByNumber.get(r.eventNumber) ?? `Event ${r.eventNumber}`}{formatEventDateDisplay(r.eventDate) ? ` · ${formatEventDateDisplay(r.eventDate)}` : ''}
             </option>
           ))}
         </select>
@@ -479,7 +498,20 @@ export default memo(function WeeklyRecapPage({ events, courseConfig }: WeeklyRec
             <thead>
               <tr>
                 <th className="pp-sc-label">Player</th>
-                {scorecardHoleHeaders.map((hole) => <th key={hole} className="pp-sc-hole">#{hole}</th>)}
+                {scorecardHoleHeaders.map((hole) => (
+                  <th key={hole} className="pp-sc-hole">
+                    {onHoleClick ? (
+                      <button
+                        className="icon-btn"
+                        style={{ width: 'auto', height: 'auto', padding: 0, color: 'var(--text)', textDecoration: 'underline' }}
+                        onClick={() => onHoleClick(hole, recapNine)}
+                        title={`View hole ${hole} profile`}
+                      >
+                        #{hole}
+                      </button>
+                    ) : `#${hole}`}
+                  </th>
+                ))}
                 <th className="pp-sc-total">Gross</th>
                 <th className="pp-sc-total">Net</th>
                 <th className="pp-sc-total">Pts</th>
@@ -497,7 +529,18 @@ export default memo(function WeeklyRecapPage({ events, courseConfig }: WeeklyRec
               )}
               {weeklyScorecardRows.map((player) => (
                 <tr key={player.playerName} className="pp-sc-row">
-                  <td className="pp-sc-label">{player.displayName}</td>
+                  <td className="pp-sc-label">
+                    {onPlayerClick ? (
+                      <button
+                        className="icon-btn"
+                        style={{ width: 'auto', height: 'auto', padding: 0, color: 'var(--text)', textDecoration: 'underline' }}
+                        onClick={() => onPlayerClick(player.playerName)}
+                        title={`View ${player.playerName} profile`}
+                      >
+                        {player.displayName}
+                      </button>
+                    ) : player.displayName}
+                  </td>
                   {player.holes.map((score, index) => {
                     const par = scorecardPars ? scorecardPars[index] : null;
                     const diff = score !== null && par !== null ? score - par : null;
@@ -514,6 +557,8 @@ export default memo(function WeeklyRecapPage({ events, courseConfig }: WeeklyRec
                         key={`${player.playerName}-${index}`}
                         className={`pp-sc-hole-cell ${cls}`}
                         title={`Hole ${scorecardHoleHeaders[index]}${par ? ` · Par ${par}` : ''}`}
+                        onClick={onHoleClick ? () => onHoleClick(scorecardHoleHeaders[index], recapNine) : undefined}
+                        style={onHoleClick ? { cursor: 'pointer' } : undefined}
                       >
                         {score ?? '—'}
                       </td>
@@ -559,22 +604,22 @@ export default memo(function WeeklyRecapPage({ events, courseConfig }: WeeklyRec
       <div className="story-grid recap-story-grid">
         <div className="story-card recap-story-card story-good">
           <span className="story-title">Most Points Gained</span>
-          <span className="story-value">{recap.winner ? formatPlayerNames(recap.winner.playerNames) : '—'}</span>
+          <span className="story-value">{recap.winner ? renderPlayerNames(recap.winner.playerNames) : '—'}</span>
           <span className="story-detail">{recap.winner ? `${recap.winner.points} points` : 'No data'}</span>
         </div>
         <div className="story-card recap-story-card story-neutral">
           <span className="story-title">Best Net Round</span>
-          <span className="story-value">{recap.bestNet ? formatPlayerNames(recap.bestNet.playerNames) : '—'}</span>
+          <span className="story-value">{recap.bestNet ? renderPlayerNames(recap.bestNet.playerNames) : '—'}</span>
           <span className="story-detail">{recap.bestNet ? `${recap.bestNet.netScore} net` : 'No data'}</span>
         </div>
         <div className="story-card recap-story-card story-neutral">
           <span className="story-title">Best Gross Round</span>
-          <span className="story-value">{recap.bestGross ? formatPlayerNames(recap.bestGross.playerNames) : '—'}</span>
+          <span className="story-value">{recap.bestGross ? renderPlayerNames(recap.bestGross.playerNames) : '—'}</span>
           <span className="story-detail">{recap.bestGross ? `${recap.bestGross.grossScore} gross` : 'No data'}</span>
         </div>
         <div className={`story-card recap-story-card ${recap.biggestMover ? 'story-good' : 'story-neutral'}`}>
           <span className="story-title">Biggest Mover</span>
-          <span className="story-value">{recap.biggestMover ? formatPlayerNames(recap.biggestMover.playerNames) : 'No change'}</span>
+          <span className="story-value">{recap.biggestMover ? renderPlayerNames(recap.biggestMover.playerNames) : 'No change'}</span>
           <span className="story-detail">{recap.biggestMover ? `Moved up ${recap.biggestMover.change} spots` : 'No upward movers that week'}</span>
         </div>
       </div>
@@ -612,22 +657,22 @@ export default memo(function WeeklyRecapPage({ events, courseConfig }: WeeklyRec
       <div className="story-grid recap-story-grid">
         <div className={`story-card recap-story-card ${roundStrugglers?.mostPointsLeftBehind ? 'story-warn' : 'story-neutral'}`}>
           <span className="story-title">Fewest Points Won</span>
-          <span className="story-value">{roundStrugglers?.mostPointsLeftBehind ? formatPlayerNames(roundStrugglers.mostPointsLeftBehind.playerNames) : '—'}</span>
+          <span className="story-value">{roundStrugglers?.mostPointsLeftBehind ? renderPlayerNames(roundStrugglers.mostPointsLeftBehind.playerNames) : '—'}</span>
           <span className="story-detail">{roundStrugglers?.mostPointsLeftBehind ? `${roundStrugglers.mostPointsLeftBehind.points} points` : 'No data'}</span>
         </div>
         <div className={`story-card recap-story-card ${roundStrugglers?.toughestNet ? 'story-warn' : 'story-neutral'}`}>
           <span className="story-title">Toughest Net Round</span>
-          <span className="story-value">{roundStrugglers?.toughestNet ? formatPlayerNames(roundStrugglers.toughestNet.playerNames) : '—'}</span>
+          <span className="story-value">{roundStrugglers?.toughestNet ? renderPlayerNames(roundStrugglers.toughestNet.playerNames) : '—'}</span>
           <span className="story-detail">{roundStrugglers?.toughestNet ? `${roundStrugglers.toughestNet.netScore} net` : 'No data'}</span>
         </div>
         <div className={`story-card recap-story-card ${roundStrugglers?.toughestGross ? 'story-warn' : 'story-neutral'}`}>
           <span className="story-title">Toughest Gross Round</span>
-          <span className="story-value">{roundStrugglers?.toughestGross ? formatPlayerNames(roundStrugglers.toughestGross.playerNames) : '—'}</span>
+          <span className="story-value">{roundStrugglers?.toughestGross ? renderPlayerNames(roundStrugglers.toughestGross.playerNames) : '—'}</span>
           <span className="story-detail">{roundStrugglers?.toughestGross ? `${roundStrugglers.toughestGross.grossScore} gross` : 'No data'}</span>
         </div>
         <div className={`story-card recap-story-card ${roundStrugglers?.biggestSlide ? 'story-warn' : 'story-neutral'}`}>
           <span className="story-title">Biggest Slide</span>
-          <span className="story-value">{roundStrugglers?.biggestSlide ? formatPlayerNames(roundStrugglers.biggestSlide.playerNames) : 'No change'}</span>
+          <span className="story-value">{roundStrugglers?.biggestSlide ? renderPlayerNames(roundStrugglers.biggestSlide.playerNames) : 'No change'}</span>
           <span className="story-detail">{roundStrugglers?.biggestSlide ? `Dropped ${roundStrugglers.biggestSlide.drop} spots` : 'No one dropped in the standings'}</span>
         </div>
       </div>
@@ -669,12 +714,12 @@ export default memo(function WeeklyRecapPage({ events, courseConfig }: WeeklyRec
       <div className="story-grid recap-story-grid recap-story-grid-secondary">
         <div className="story-card recap-story-card story-neutral">
           <span className="story-title">Cleanest Card</span>
-          <span className="story-value">{recap.cleanestCard ? formatPlayerNames(recap.cleanestCard.playerNames) : '—'}</span>
+          <span className="story-value">{recap.cleanestCard ? renderPlayerNames(recap.cleanestCard.playerNames) : '—'}</span>
           <span className="story-detail">{recap.cleanestCard ? `${recap.cleanestCard.bogeysOrWorse} bogeys or worse` : 'No data'}</span>
         </div>
         <div className={`story-card recap-story-card ${recap.hardestHole ? 'story-warn' : 'story-neutral'}`}>
           <span className="story-title">Hardest Hole</span>
-          <span className="story-value">{recap.hardestHole ? `Hole ${recap.hardestHole.holeNum}` : '—'}</span>
+          <span className="story-value">{recap.hardestHole ? renderHoleLabel(recap.hardestHole.holeNum) : '—'}</span>
           <span className="story-detail">
             {recap.hardestHole
               ? `${recap.hardestHole.avgVsPar >= 0 ? '+' : ''}${recap.hardestHole.avgVsPar.toFixed(2)} vs par`
@@ -683,7 +728,7 @@ export default memo(function WeeklyRecapPage({ events, courseConfig }: WeeklyRec
         </div>
         <div className={`story-card recap-story-card ${recap.easiestHole ? 'story-good' : 'story-neutral'}`}>
           <span className="story-title">Easiest Hole</span>
-          <span className="story-value">{recap.easiestHole ? `Hole ${recap.easiestHole.holeNum}` : '—'}</span>
+          <span className="story-value">{recap.easiestHole ? renderHoleLabel(recap.easiestHole.holeNum) : '—'}</span>
           <span className="story-detail">
             {recap.easiestHole
               ? `${recap.easiestHole.avgVsPar >= 0 ? '+' : ''}${recap.easiestHole.avgVsPar.toFixed(2)} vs par`
@@ -730,7 +775,7 @@ export default memo(function WeeklyRecapPage({ events, courseConfig }: WeeklyRec
       <div className="story-grid recap-story-grid recap-story-grid-secondary">
         <div className={`story-card recap-story-card ${funnyRecap?.closestDuel ? 'story-warn' : 'story-neutral'}`}>
           <span className="story-title">Cardiac Finish</span>
-          <span className="story-value">{funnyRecap?.closestDuel ? formatPlayerNames(funnyRecap.closestDuel.playerNames) : '—'}</span>
+          <span className="story-value">{funnyRecap?.closestDuel ? renderPlayerNames(funnyRecap.closestDuel.playerNames) : '—'}</span>
           <span className="story-detail">
             {funnyRecap?.closestDuel
               ? `${funnyRecap.closestDuel.gap.toFixed(1)} shot gap in net score`
@@ -739,7 +784,7 @@ export default memo(function WeeklyRecapPage({ events, courseConfig }: WeeklyRec
         </div>
         <div className={`story-card recap-story-card ${funnyRecap?.rollercoaster ? 'story-warn' : 'story-neutral'}`}>
           <span className="story-title">Rollercoaster Round</span>
-          <span className="story-value">{funnyRecap?.rollercoaster ? formatPlayerNames(funnyRecap.rollercoaster.playerNames) : '—'}</span>
+          <span className="story-value">{funnyRecap?.rollercoaster ? renderPlayerNames(funnyRecap.rollercoaster.playerNames) : '—'}</span>
           <span className="story-detail">
             {funnyRecap?.rollercoaster
               ? `${funnyRecap.rollercoaster.spread} shot swing between best and worst hole`
@@ -748,7 +793,7 @@ export default memo(function WeeklyRecapPage({ events, courseConfig }: WeeklyRec
         </div>
         <div className={`story-card recap-story-card ${funnyRecap?.troubleMagnet ? 'story-warn' : 'story-neutral'}`}>
           <span className="story-title">Trouble Magnet</span>
-          <span className="story-value">{funnyRecap?.troubleMagnet ? formatPlayerNames(funnyRecap.troubleMagnet.playerNames) : '—'}</span>
+          <span className="story-value">{funnyRecap?.troubleMagnet ? renderPlayerNames(funnyRecap.troubleMagnet.playerNames) : '—'}</span>
           <span className="story-detail">
             {funnyRecap?.troubleMagnet
               ? `${funnyRecap.troubleMagnet.count} bogeys or worse`
@@ -757,7 +802,7 @@ export default memo(function WeeklyRecapPage({ events, courseConfig }: WeeklyRec
         </div>
         <div className={`story-card recap-story-card ${funnyRecap?.disasterArtists ? 'story-warn' : 'story-neutral'}`}>
           <span className="story-title">Blow-Up Hole</span>
-          <span className="story-value">{funnyRecap?.disasterArtists ? formatPlayerNames(funnyRecap.disasterArtists.playerNames) : '—'}</span>
+          <span className="story-value">{funnyRecap?.disasterArtists ? renderPlayerNames(funnyRecap.disasterArtists.playerNames) : '—'}</span>
           <span className="story-detail">
             {funnyRecap?.disasterArtists
               ? `${funnyRecap.disasterArtists.worstVsPar >= 0 ? '+' : ''}${funnyRecap.disasterArtists.worstVsPar} on a single hole`

@@ -2,6 +2,7 @@ import { useMemo, memo } from 'react';
 import type { EventData } from '../types/golf';
 import { getPlayerColor } from '../lib/colors';
 import { useIsMobile } from '../lib/useIsMobile';
+import { getEventDisplayName } from '../lib/eventNames';
 
 interface StandingsTableProps {
   events: EventData[];
@@ -78,7 +79,7 @@ export default memo(function StandingsTable({ events, onPlayerClick }: Standings
     <div className="chart-container">
       <h3 className="chart-title">
         Current Standings
-        <span className="chart-badge">After Event {latestEvent.eventNumber}</span>
+        <span className="chart-badge">After {getEventDisplayName(latestEvent)}</span>
       </h3>
       <p className="chart-subtitle">{playedCount} player{playedCount !== 1 ? 's' : ''} ranked</p>
       {isMobile ? (

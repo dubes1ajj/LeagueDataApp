@@ -42,11 +42,21 @@ export interface PlayerEventData {
 export interface EventData {
   id: string;
   eventNumber: number;
+  eventName?: string;
   eventDate: string; // e.g. "4/22/2025"
+  eventWeather?: EventWeather;
   nineHoles: 'front' | 'back'; // which 9 holes were played this event
   players: PlayerEventData[];
   // Derived: cumulative standings at end of this event
   standings: StandingEntry[];
+}
+
+export interface EventWeather {
+  summary?: string;
+  temperatureF?: number;
+  feelsLikeF?: number;
+  precipitationMm?: number;
+  windMph?: number;
 }
 
 export interface StandingEntry {
@@ -55,8 +65,39 @@ export interface StandingEntry {
   position: number;
 }
 
+export type HandicapMode = 'general' | 'front-back';
+
+export type AdjustedScoringMode = 'none' | 'drop-lowest';
+
+export interface AdjustedScoringSettings {
+  mode: AdjustedScoringMode;
+  dropCount: number;
+}
+
+export type EventDateFormat = 'M/D/YYYY' | 'MM/DD/YYYY' | 'MMM D, YYYY' | 'D MMM YYYY' | 'YYYY-MM-DD';
+export type EventTimeFormat = '12h' | '24h';
+
+export interface EventDateDisplaySettings {
+  showDate: boolean;
+  showTime: boolean;
+  dateFormat: EventDateFormat;
+  timeFormat: EventTimeFormat;
+}
+
+export interface LeagueWeatherSettings {
+  locationName: string;
+  latitude: number | null;
+  longitude: number | null;
+  playTime: string; // 24h HH:mm
+}
+
 export interface LeagueData {
   leagueName: string;
+  leagueImage?: string;
+  handicapMode: HandicapMode;
+  adjustedScoring: AdjustedScoringSettings;
+  eventDateDisplay: EventDateDisplaySettings;
+  weatherSettings: LeagueWeatherSettings;
   events: EventData[];
 }
 
@@ -64,6 +105,12 @@ export interface LeagueData {
 export interface PlayerConfig {
   /** playerName → true if active (default), false if hidden */
   active: Record<string, boolean>;
+}
+
+export interface ColorSchemeConfig {
+  playerColors: Record<string, string>;
+  eventColors: Record<string, string>;
+  themeColors: Record<string, string>;
 }
 
 // For the bump chart — one data point per event per player

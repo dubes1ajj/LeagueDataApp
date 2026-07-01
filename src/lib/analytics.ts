@@ -136,13 +136,14 @@ export function buildSeasonDashboard(events: EventData[], courseConfig: CourseCo
     }
   }
 
-  // Closest points race among top 2
-  const top2 = latest.standings.slice(0, 2);
-  const closestGap = top2.length === 2 ? top2[0].cumulativePoints - top2[1].cumulativePoints : null;
-
   return [
     biggestMover
-      ? { title: 'Biggest Mover', value: `${formatPlayerNames(biggestMover.playerNames)} ▲${biggestMover.change}`, detail: `Moved up the most in Event ${latest.eventNumber}`, tone: 'good' }
+      ? {
+          title: 'Biggest Mover',
+          value: `${formatPlayerNames(biggestMover.playerNames)} ▲${biggestMover.change}`,
+          detail: `Moved up the most in Event ${latest.eventNumber}`,
+          tone: 'good',
+        }
       : { title: 'Biggest Mover', value: 'No change', detail: `No one moved up in Event ${latest.eventNumber}`, tone: 'neutral' },
     hottest.length
       ? { title: 'Most Momentum', value: formatPlayerNames(hottest), detail: `${hottestScore} pts over last 3 events`, tone: 'good' }
@@ -156,9 +157,6 @@ export function buildSeasonDashboard(events: EventData[], courseConfig: CourseCo
     bestNet
       ? { title: 'Best Net Round', value: `${bestNet.netScore}`, detail: `${formatPlayerNames(bestNet.playerNames)} in Event${bestNet.eventNumbers.length > 1 ? 's' : ''} ${bestNet.eventNumbers.join(', ')}`, tone: 'good' }
       : { title: 'Best Net Round', value: '—', detail: 'No net rounds yet', tone: 'neutral' },
-    closestGap !== null
-      ? { title: 'Closest Race', value: `${closestGap} pts`, detail: `${top2[0].playerName.split(',')[0]} vs ${top2[1].playerName.split(',')[0]}`, tone: closestGap <= 50 ? 'warn' : 'neutral' }
-      : { title: 'Closest Race', value: '—', detail: 'Need two ranked players', tone: 'neutral' },
   ];
 }
 
@@ -222,14 +220,13 @@ export function buildWeeklyRecaps(events: EventData[], courseConfig: CourseConfi
         }
       }
 
-      let bogeysOrWorse = 0;
-      if (courseConfig) {
-        const pars = getParsForNine(courseConfig, ev.nineHoles);
-        const bd = computeBreakdown(p.holes, pars);
-        bogeysOrWorse = bd.bogeys + bd.doubleBogeys + bd.tripleBogeys + bd.other;
-      } else {
-        bogeysOrWorse = p.bogeys + p.doubleBogeys + p.tripleBogeys + p.other;
-      }
+      const bogeysOrWorse = courseConfig
+        ? (() => {
+          const pars = getParsForNine(courseConfig, ev.nineHoles);
+          const bd = computeBreakdown(p.holes, pars);
+          return bd.bogeys + bd.doubleBogeys + bd.tripleBogeys + bd.other;
+        })()
+        : p.bogeys + p.doubleBogeys + p.tripleBogeys + p.other;
       if (!cleanestCard || bogeysOrWorse < cleanestCard.bogeysOrWorse) {
         cleanestCard = { playerNames: [p.playerName], bogeysOrWorse };
       } else if (bogeysOrWorse === cleanestCard.bogeysOrWorse) {

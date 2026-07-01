@@ -14,30 +14,59 @@ import { useIsMobile } from '../lib/useIsMobile';
 interface CumulativePointsProps {
   events: EventData[];
   topN?: number;
+  onOpenPlayer?: (playerName: string) => void;
+  rankBasis?: 'adjusted' | 'raw';
 }
 
-export default memo(function CumulativePointsChart({ events, topN = 999 }: CumulativePointsProps) {
+export default memo(function CumulativePointsChart({ events, topN = 999, onOpenPlayer, rankBasis = 'adjusted' }: CumulativePointsProps) {
   const sorted = useMemo(() => [...events].sort((a, b) => a.eventNumber - b.eventNumber), [events]);
 
   const topPlayers = useMemo(() => {
     const totals: Record<string, number> = {};
-    for (const ev of sorted) {
-      for (const standing of ev.standings) {
-        totals[standing.playerName] = standing.cumulativePoints;
+    if (rankBasis === 'raw') {
+      for (const ev of sorted) {
+        for (const player of ev.players) {
+          if (player.didNotPlay) continue;
+          totals[player.playerName] = (totals[player.playerName] ?? 0) + player.points;
+        }
+      }
+    } else {
+      for (const ev of sorted) {
+        for (const standing of ev.standings) {
+          totals[standing.playerName] = standing.cumulativePoints;
+        }
       }
     }
     return Object.entries(totals)
       .sort(([, a], [, b]) => b - a)
       .slice(0, topN)
       .map(([name]) => name);
-  }, [sorted, topN]);
+  }, [rankBasis, sorted, topN]);
 
-  const { selected, toggle, clearAll, getLineProps } = useLineSelect(topPlayers);
+  const { selected, toggle, clearAll, getLineProps } = useLineSelect();
   const c = useChartColors();
   const isMobile = useIsMobile();
   const tooltipTrigger = getTooltipTrigger(isMobile);
 
   const chartData = useMemo(() => {
+    if (rankBasis === 'raw') {
+      const running: Record<string, number> = {};
+      return sorted.map(ev => {
+        const obj: Record<string, number | string> = {
+          event: `Evt ${ev.eventNumber}`,
+          date: ev.eventDate,
+        };
+        for (const p of ev.players) {
+          if (p.didNotPlay) continue;
+          running[p.playerName] = (running[p.playerName] ?? 0) + p.points;
+        }
+        for (const player of topPlayers) {
+          obj[player] = running[player] ?? 0;
+        }
+        return obj;
+      });
+    }
+
     return sorted.map(ev => {
       const obj: Record<string, number | string> = {
         event: `Evt ${ev.eventNumber}`,
@@ -49,7 +78,7 @@ export default memo(function CumulativePointsChart({ events, topN = 999 }: Cumul
       }
       return obj;
     });
-  }, [sorted, topPlayers]);
+  }, [rankBasis, sorted, topPlayers]);
 
   if (events.length === 0) {
     return (
@@ -64,7 +93,7 @@ export default memo(function CumulativePointsChart({ events, topN = 999 }: Cumul
     <div className="chart-container">
       <h3 className="chart-title">Cumulative Points Race</h3>
       <p className="chart-subtitle">
-        {topPlayers.length} players · click a name below to isolate
+        {topPlayers.length} players · {rankBasis === 'raw' ? 'ranked by total points' : 'ranked by adjusted points'} · click a name below to isolate
       </p>
       <ResponsiveContainer width="100%" height={Math.max(isMobile ? 320 : 460, topPlayers.length * (isMobile ? 14 : 18))}>
         <LineChart data={chartData} margin={{ top: 10, right: isMobile ? 10 : 160, left: isMobile ? -14 : 0, bottom: 10 }}>
@@ -115,7 +144,7 @@ export default memo(function CumulativePointsChart({ events, topN = 999 }: Cumul
           })}
         </LineChart>
       </ResponsiveContainer>
-      <ClickableLegend players={topPlayers} selected={selected} onToggle={toggle} onClearAll={clearAll} />
+      <ClickableLegend players={topPlayers} selected={selected} onToggle={toggle} onClearAll={clearAll} onOpenPlayer={onOpenPlayer} />
     </div>
   );
 });

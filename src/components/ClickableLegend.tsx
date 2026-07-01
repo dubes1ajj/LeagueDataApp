@@ -5,6 +5,7 @@ interface ClickableLegendProps {
   selected: Set<string>;
   onToggle: (player: string) => void;
   onClearAll: () => void;
+  onOpenPlayer?: (player: string) => void;
 }
 
 export function ClickableLegend({ players, selected, onToggle, onClearAll }: ClickableLegendProps) {

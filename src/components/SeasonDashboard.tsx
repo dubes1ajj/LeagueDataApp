@@ -1,14 +1,30 @@
-import { memo } from 'react';
+import { memo, type ReactNode } from 'react';
 import type { EventData, CourseConfig } from '../types/golf';
 import { buildSeasonDashboard } from '../lib/analytics';
 
 interface SeasonDashboardProps {
   events: EventData[];
   courseConfig: CourseConfig | null;
+  children?: ReactNode;
 }
 
-export default memo(function SeasonDashboard({ events, courseConfig }: SeasonDashboardProps) {
+export default memo(function SeasonDashboard({ events, courseConfig, children }: SeasonDashboardProps) {
   const cards = buildSeasonDashboard(events, courseConfig);
+
+  function renderCardValue(title: string, value: string) {
+    if (title !== 'Biggest Mover') return value;
+    const match = value.match(/^(.*)\s([▲▼])(\d+)$/);
+    if (!match) return value;
+    const [, label, arrow, amount] = match;
+    return (
+      <>
+        {label}{' '}
+        <span style={{ color: arrow === '▲' ? '#22c55e' : '#ef4444', fontWeight: 800 }}>
+          {arrow}{amount}
+        </span>
+      </>
+    );
+  }
 
   if (!cards.length) {
     return (
@@ -27,11 +43,12 @@ export default memo(function SeasonDashboard({ events, courseConfig }: SeasonDas
         {cards.map((card) => (
           <div key={card.title} className={`story-card story-${card.tone ?? 'neutral'}`}>
             <span className="story-title">{card.title}</span>
-            <span className="story-value">{card.value}</span>
+            <span className="story-value">{renderCardValue(card.title, card.value)}</span>
             <span className="story-detail">{card.detail}</span>
           </div>
         ))}
       </div>
+      {children}
     </div>
   );
 });

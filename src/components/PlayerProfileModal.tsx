@@ -4,22 +4,36 @@ import {
   ResponsiveContainer, BarChart, Bar, Cell, RadarChart,
   PolarGrid, PolarAngleAxis, Radar
 } from 'recharts';
-import type { EventData, CourseConfig } from '../types/golf';
+import type { AdjustedScoringSettings, EventData, CourseConfig, HandicapMode } from '../types/golf';
 import { getPlayerColor } from '../lib/colors';
 import { computeBreakdown, getParsForNine } from '../lib/scoring';
 import { useChartColors } from '../lib/useChartColors';
 import { X, TrendingUp, TrendingDown, Minus } from 'lucide-react';
+import { getEventDisplayName } from '../lib/eventNames';
+import { formatEventDateDisplay } from '../lib/eventDateDisplay';
 
 interface PlayerProfileModalProps {
   playerName: string;
   events: EventData[];
   courseConfig: CourseConfig | null;
+  handicapMode: HandicapMode;
+  adjustedScoring?: AdjustedScoringSettings;
+  onHoleClick?: (holeNum: number, nine: 'front' | 'back') => void;
   onClose: () => void;
 }
 
 // ── helpers ──────────────────────────────────────────────────────────────────
 function avg(nums: number[]): number {
   return nums.length ? nums.reduce((s, n) => s + n, 0) / nums.length : 0;
+}
+
+function getTrend(values: number[]): 'up' | 'down' | 'flat' {
+  if (values.length < 2) return 'flat';
+  const first = values[0];
+  const last = values[values.length - 1];
+  if (last < first) return 'down';
+  if (last > first) return 'up';
+  return 'flat';
 }
 
 function StatCard({ label, value, sub, trend }: {
@@ -44,10 +58,14 @@ const SCORE_COLORS: Record<string, string> = {
 
 // ── Main component ────────────────────────────────────────────────────────────
 export default function PlayerProfileModal({
-  playerName, events, courseConfig, onClose,
+  playerName, events, courseConfig, handicapMode, adjustedScoring, onHoleClick, onClose,
 }: PlayerProfileModalProps) {
   const color = getPlayerColor(playerName);
   const c = useChartColors();
+  const handicapLabel = handicapMode === 'front-back' ? 'Side H\'cap' : 'H\'cap';
+  const handicapLongLabel = handicapMode === 'front-back' ? 'Side Handicap' : 'Handicap';
+  const adjustedMode = adjustedScoring?.mode ?? 'none';
+  const adjustedDropCount = Math.max(0, Math.floor(adjustedScoring?.dropCount ?? 0));
   const sortedEvents = useMemo(() =>
     [...events].sort((a, b) => a.eventNumber - b.eventNumber), [events]);
 
@@ -69,6 +87,19 @@ export default function PlayerProfileModal({
     return null;
   }, [sortedEvents, playerName]);
 
+  const droppedEventIds = useMemo(() => {
+    if (adjustedMode !== 'drop-lowest' || adjustedDropCount <= 0) return new Set<string>();
+    const played = playerRounds
+      .map((round) => ({
+        eventId: round.ev.id,
+        eventNumber: round.ev.eventNumber,
+        points: round.data?.points ?? 0,
+      }))
+      .sort((a, b) => a.points - b.points || a.eventNumber - b.eventNumber);
+    const drop = Math.min(adjustedDropCount, played.length);
+    return new Set(played.slice(0, drop).map((item) => item.eventId));
+  }, [adjustedDropCount, adjustedMode, playerRounds]);
+
   // ── Summary stats ──────────────────────────────────────────────────────────
   const stats = useMemo(() => {
     if (!playerRounds.length) return null;
@@ -76,6 +107,10 @@ export default function PlayerProfileModal({
     const netScores   = playerRounds.map(r => r.data!.netScore).filter((v): v is number => v !== null);
     const points      = playerRounds.map(r => r.data!.points);
     const handicaps   = playerRounds.map(r => r.data!.handicap);
+    const frontRounds = playerRounds.filter(r => r.ev.nineHoles !== 'back');
+    const backRounds  = playerRounds.filter(r => r.ev.nineHoles === 'back');
+    const frontHandicaps = frontRounds.map(r => r.data!.handicap);
+    const backHandicaps  = backRounds.map(r => r.data!.handicap);
 
     const bestGross = grossScores.length ? Math.min(...grossScores) : null;
     const worstGross = grossScores.length ? Math.max(...grossScores) : null;
@@ -83,11 +118,9 @@ export default function PlayerProfileModal({
     const eventsPlayed = playerRounds.length;
     const totalEvents = sortedEvents.length;
 
-    // Handicap trend: compare last vs first
-    const hcpTrend = handicaps.length >= 2
-      ? (handicaps[handicaps.length - 1] < handicaps[0] ? 'down'
-        : handicaps[handicaps.length - 1] > handicaps[0] ? 'up' : 'flat')
-      : 'flat';
+    const hcpTrend = getTrend(handicaps);
+    const frontHcpTrend = getTrend(frontHandicaps);
+    const backHcpTrend = getTrend(backHandicaps);
 
     return {
       eventsPlayed, totalEvents,
@@ -96,7 +129,11 @@ export default function PlayerProfileModal({
       avgPoints: avg(points).toFixed(1),
       bestGross, worstGross, bestPoints,
       currentHcp: handicaps[handicaps.length - 1] ?? '—',
+      currentFrontHcp: frontHandicaps[frontHandicaps.length - 1] ?? '—',
+      currentBackHcp: backHandicaps[backHandicaps.length - 1] ?? '—',
       hcpTrend: hcpTrend as 'up' | 'down' | 'flat',
+      frontHcpTrend: frontHcpTrend as 'up' | 'down' | 'flat',
+      backHcpTrend: backHcpTrend as 'up' | 'down' | 'flat',
     };
   }, [playerRounds, sortedEvents]);
 
@@ -127,14 +164,18 @@ export default function PlayerProfileModal({
     playerRounds.map(({ ev, data, standing }) => ({
       label: `E${ev.eventNumber}`,
       date: ev.eventDate,
+      dropped: droppedEventIds.has(ev.id),
+      side: ev.nineHoles === 'back' ? 'Back' : 'Front',
       gross: data?.grossScore ?? null,
       net: data?.netScore ?? null,
       points: data?.points ?? 0,
       handicap: data?.handicap ?? null,
+      frontHandicap: ev.nineHoles === 'back' ? null : (data?.handicap ?? null),
+      backHandicap: ev.nineHoles === 'back' ? (data?.handicap ?? null) : null,
       position: standing?.position ?? null,
       cumulativePoints: standing?.cumulativePoints ?? 0,
     })),
-    [playerRounds]);
+    [droppedEventIds, playerRounds]);
 
   // ── Per-hole stats for this player vs field ──────────────────────────────
   const perHoleStats = useMemo(() => {
@@ -208,9 +249,28 @@ export default function PlayerProfileModal({
   }, [courseConfig, sortedEvents, playerName]);
 
   // ── Hole-by-hole scorecard table ──────────────────────────────────────────
-  const holeHeaders = useMemo(() => {
-    if (!playerRounds.length) return [];
-    return Array.from({ length: 9 }, (_, i) => i + 1);
+  const roundScorecardGroups = useMemo(() => {
+    const groups = [
+      {
+        nine: 'front' as const,
+        label: 'Front 9',
+        startHole: 1,
+        rounds: playerRounds.filter(({ ev }) => ev.nineHoles !== 'back'),
+      },
+      {
+        nine: 'back' as const,
+        label: 'Back 9',
+        startHole: 10,
+        rounds: playerRounds.filter(({ ev }) => ev.nineHoles === 'back'),
+      },
+    ];
+
+    return groups
+      .map((group) => ({
+        ...group,
+        holeHeaders: Array.from({ length: 9 }, (_, index) => group.startHole + index),
+      }))
+      .filter((group) => group.rounds.length > 0);
   }, [playerRounds]);
 
   // ── Radar data (scoring profile vs averages) ──────────────────────────────
@@ -260,7 +320,14 @@ export default function PlayerProfileModal({
               <StatCard label="Avg Points" value={stats.avgPoints} />
               <StatCard label="Best Gross" value={stats.bestGross ?? '—'} />
               <StatCard label="Best Points" value={stats.bestPoints ?? '—'} />
-              <StatCard label="Current H'cap" value={stats.currentHcp} trend={stats.hcpTrend} />
+              {handicapMode === 'front-back' ? (
+                <>
+                  <StatCard label="Current Front H'cap" value={stats.currentFrontHcp} trend={stats.frontHcpTrend} />
+                  <StatCard label="Current Back H'cap" value={stats.currentBackHcp} trend={stats.backHcpTrend} />
+                </>
+              ) : (
+                <StatCard label={`Current ${handicapLabel}`} value={stats.currentHcp} trend={stats.hcpTrend} />
+              )}
             </div>
           )}
 
@@ -274,6 +341,11 @@ export default function PlayerProfileModal({
             <>
               {/* ── Points + cumulative history ─────────────────────── */}
               <div className="pp-section-title">Points History</div>
+              {adjustedMode === 'drop-lowest' && droppedEventIds.size > 0 && (
+                <p className="pp-chart-label" style={{ marginBottom: 8 }}>
+                  Dropped rounds are shown in muted gray and tagged "Dropped" in scorecards.
+                </p>
+              )}
               <div className="pp-charts-row">
                 <div className="pp-chart-half">
                   <p className="pp-chart-label">Points per Event</p>
@@ -285,10 +357,23 @@ export default function PlayerProfileModal({
                       <Tooltip
                         contentStyle={{ background: c.tooltipBg, border: `1px solid ${c.border}`, borderRadius: 8 }}
                         labelStyle={{ color: c.text2 }}
+                        formatter={(value, name, entry: { payload?: { dropped?: boolean } }) => {
+                          if (name === 'Points') {
+                            return [
+                              entry.payload?.dropped ? `${value} (dropped)` : value,
+                              'Points',
+                            ];
+                          }
+                          return [value, name];
+                        }}
                       />
                       <Bar dataKey="points" name="Points" radius={[3, 3, 0, 0]}>
-                        {eventChartData.map((_, i) => (
-                          <Cell key={i} fill={color} opacity={0.7 + i * (0.3 / Math.max(eventChartData.length, 1))} />
+                        {eventChartData.map((entry, i) => (
+                          <Cell
+                            key={i}
+                            fill={entry.dropped ? '#94a3b8' : color}
+                            opacity={entry.dropped ? 0.45 : (0.7 + i * (0.3 / Math.max(eventChartData.length, 1)))}
+                          />
                         ))}
                       </Bar>
                     </BarChart>
@@ -333,7 +418,9 @@ export default function PlayerProfileModal({
                 </div>
 
                 <div className="pp-chart-half">
-                  <p className="pp-chart-label">Handicap</p>
+                  <p className="pp-chart-label">
+                    {handicapMode === 'front-back' ? 'Side Handicap (Front vs Back)' : handicapLongLabel}
+                  </p>
                   <ResponsiveContainer width="100%" height={180}>
                     <LineChart data={eventChartData} margin={{ top: 4, right: 8, left: -20, bottom: 4 }}>
                       <CartesianGrid strokeDasharray="3 3" stroke={c.grid} />
@@ -342,8 +429,22 @@ export default function PlayerProfileModal({
                       <Tooltip
                         contentStyle={{ background: c.tooltipBg, border: `1px solid ${c.border}`, borderRadius: 8 }}
                         labelStyle={{ color: c.text2 }}
+                        formatter={(value, name, entry: { payload?: { side?: string } }) => {
+                          if (handicapMode !== 'front-back') return [value, name];
+                          if (name === 'Front Handicap') return [value, 'Front Handicap'];
+                          if (name === 'Back Handicap') return [value, 'Back Handicap'];
+                          const side = entry.payload?.side ?? 'Unknown side';
+                          return [value, `${name} (${side})`];
+                        }}
                       />
-                      <Line type="linear" dataKey="handicap" name="Handicap" stroke="#a855f7" strokeWidth={2} dot={{ r: 3 }} connectNulls />
+                      {handicapMode === 'front-back' ? (
+                        <>
+                          <Line type="linear" dataKey="frontHandicap" name="Front Handicap" stroke="#22c55e" strokeWidth={2} dot={{ r: 3 }} connectNulls />
+                          <Line type="linear" dataKey="backHandicap" name="Back Handicap" stroke="#f97316" strokeWidth={2} dot={{ r: 3 }} connectNulls />
+                        </>
+                      ) : (
+                        <Line type="linear" dataKey="handicap" name={handicapLongLabel} stroke="#a855f7" strokeWidth={2} dot={{ r: 3 }} connectNulls />
+                      )}
                     </LineChart>
                   </ResponsiveContainer>
                 </div>
@@ -474,7 +575,7 @@ export default function PlayerProfileModal({
                         <tbody>
                           {group.holes.map((h, i) => {
                             const vsParColor = h.playerVsPar === null ? c.tick
-                              : h.playerVsPar <= -1 ? '#22c55e'
+                              : h.playerVsPar < 0 ? '#22c55e'
                               : h.playerVsPar === 0 ? '#4f8ef7'
                               : h.playerVsPar <= 1  ? '#f97316'
                               : '#ef4444';
@@ -485,9 +586,20 @@ export default function PlayerProfileModal({
                             return (
                               <tr key={i} className={i % 2 === 0 ? '' : 'pp-sc-row'}>
                                 <td className="pp-sc-label">
-                                  <span className="hs-hole-badge" style={{ background: color, color: '#fff' }}>
-                                    {h.holeNum}
-                                  </span>
+                                  {onHoleClick ? (
+                                    <button
+                                      className="hs-hole-badge hs-hole-clickable"
+                                      style={{ background: color, color: '#fff' }}
+                                      onClick={() => onHoleClick(h.holeNum, group.nine)}
+                                      title={`View hole ${h.holeNum} profile`}
+                                    >
+                                      {h.holeNum}
+                                    </button>
+                                  ) : (
+                                    <span className="hs-hole-badge" style={{ background: color, color: '#fff' }}>
+                                      {h.holeNum}
+                                    </span>
+                                  )}
                                 </td>
                                 <td className="pp-sc-hole-cell">{h.par}</td>
                                 <td className="pp-sc-hole-cell">{h.rounds}</td>
@@ -535,52 +647,82 @@ export default function PlayerProfileModal({
               {/* ── Round Scorecards ─────────────────────────────── */}
               <div className="pp-section-title">Round Scorecards</div>
               <div className="pp-scorecard-wrap">
-                <table className="pp-scorecard">
-                  <thead>
-                    <tr>
-                      <th className="pp-sc-label">Event</th>
-                      <th className="pp-sc-label">Nine</th>
-                      {holeHeaders.map(h => <th key={h} className="pp-sc-hole">#{h}</th>)}
-                      <th className="pp-sc-total">Gross</th>
-                      <th className="pp-sc-total">Net</th>
-                      <th className="pp-sc-total">Pts</th>
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {playerRounds.map(({ ev, data }) => {
-                      if (!data) return null;
-                      const pars = courseConfig ? getParsForNine(courseConfig, ev.nineHoles ?? 'front') : null;
-                      const nineLabel = ev.nineHoles === 'back' ? 'Back 9' : 'Front 9';
-                      const startHole = ev.nineHoles === 'back' ? 10 : 1;
-                      return (
-                        <tr key={ev.id} className="pp-sc-row">
-                          <td className="pp-sc-label">E{ev.eventNumber}{ev.eventDate ? ` · ${ev.eventDate}` : ''}</td>
-                          <td className="pp-sc-label">{nineLabel}</td>
-                          {data.holes.map((score, i) => {
-                            const holeNum = startHole + i;
-                            const par = pars ? pars[i] : null;
-                            const diff = score !== null && par !== null ? score - par : null;
-                            const cls = diff === null ? ''
-                              : diff <= -2 ? 'pp-sc-eagle'
-                              : diff === -1 ? 'pp-sc-birdie'
-                              : diff === 0  ? 'pp-sc-par'
-                              : diff === 1  ? 'pp-sc-bogey'
-                              : diff === 2  ? 'pp-sc-dbl'
-                              : 'pp-sc-trpl';
-                            return (
-                              <td key={i} className={`pp-sc-hole-cell ${cls}`} title={`Hole ${holeNum}${par ? ` · Par ${par}` : ''}`}>
-                                {score ?? '—'}
-                              </td>
-                            );
-                          })}
-                          <td className="pp-sc-total">{data.grossScore ?? '—'}</td>
-                          <td className="pp-sc-total">{data.netScore ?? '—'}</td>
-                          <td className="pp-sc-total pp-sc-pts">{data.points}</td>
+                {roundScorecardGroups.map((group) => (
+                  <div key={group.nine} style={{ marginBottom: 16 }}>
+                    <p className="pp-chart-label" style={{ marginBottom: 8 }}>{group.label}</p>
+                    <table className="pp-scorecard">
+                      <thead>
+                        <tr>
+                          <th className="pp-sc-label">Event</th>
+                          <th className="pp-sc-label">Nine</th>
+                          {group.holeHeaders.map(h => (
+                            <th key={h} className="pp-sc-hole">
+                              {onHoleClick ? (
+                                <button
+                                  className="icon-btn"
+                                  style={{ width: 'auto', height: 'auto', padding: 0, color: 'var(--text)', textDecoration: 'underline' }}
+                                  onClick={() => onHoleClick(h, group.nine)}
+                                  title={`View hole ${h} profile`}
+                                >
+                                  #{h}
+                                </button>
+                              ) : `#${h}`}
+                            </th>
+                          ))}
+                          <th className="pp-sc-total">Gross</th>
+                          <th className="pp-sc-total">Net</th>
+                          <th className="pp-sc-total">Pts</th>
                         </tr>
-                      );
-                    })}
-                  </tbody>
-                </table>
+                      </thead>
+                      <tbody>
+                        {group.rounds.map(({ ev, data }) => {
+                          if (!data) return null;
+                          const pars = courseConfig ? getParsForNine(courseConfig, ev.nineHoles ?? 'front') : null;
+                          const nineLabel = ev.nineHoles === 'back' ? 'Back 9' : 'Front 9';
+                          const startHole = ev.nineHoles === 'back' ? 10 : 1;
+                          const isDropped = droppedEventIds.has(ev.id);
+                          return (
+                            <tr key={ev.id} className="pp-sc-row" style={isDropped ? { background: 'rgba(148,163,184,0.10)' } : undefined}>
+                              <td className="pp-sc-label">
+                                {getEventDisplayName(ev)}{formatEventDateDisplay(ev.eventDate) ? ` · ${formatEventDateDisplay(ev.eventDate)}` : ''}
+                                {isDropped && (
+                                  <span style={{ marginLeft: 8, fontSize: 11, fontWeight: 700, color: '#94a3b8', textTransform: 'uppercase' }}>Dropped</span>
+                                )}
+                              </td>
+                              <td className="pp-sc-label">{nineLabel}</td>
+                              {data.holes.map((score, i) => {
+                                const holeNum = startHole + i;
+                                const par = pars ? pars[i] : null;
+                                const diff = score !== null && par !== null ? score - par : null;
+                                const cls = diff === null ? ''
+                                  : diff <= -2 ? 'pp-sc-eagle'
+                                  : diff === -1 ? 'pp-sc-birdie'
+                                  : diff === 0  ? 'pp-sc-par'
+                                  : diff === 1  ? 'pp-sc-bogey'
+                                  : diff === 2  ? 'pp-sc-dbl'
+                                  : 'pp-sc-trpl';
+                                return (
+                                  <td
+                                    key={i}
+                                    className={`pp-sc-hole-cell ${cls}`}
+                                    title={`Hole ${holeNum}${par ? ` · Par ${par}` : ''}`}
+                                    onClick={onHoleClick ? () => onHoleClick(holeNum, ev.nineHoles ?? 'front') : undefined}
+                                    style={onHoleClick ? { cursor: 'pointer' } : undefined}
+                                  >
+                                    {score ?? '—'}
+                                  </td>
+                                );
+                              })}
+                              <td className="pp-sc-total">{data.grossScore ?? '—'}</td>
+                              <td className="pp-sc-total">{data.netScore ?? '—'}</td>
+                              <td className="pp-sc-total pp-sc-pts">{data.points}</td>
+                            </tr>
+                          );
+                        })}
+                      </tbody>
+                    </table>
+                  </div>
+                ))}
               </div>
             </>
           )}

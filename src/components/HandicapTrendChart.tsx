@@ -2,7 +2,7 @@ import { useMemo, memo } from 'react';
 import {
   LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer
 } from 'recharts';
-import type { EventData } from '../types/golf';
+import type { EventData, HandicapMode } from '../types/golf';
 import { getPlayerColor } from '../lib/colors';
 import { useLineSelect } from '../lib/useLineHover';
 import { ChartTooltip } from './ChartTooltip';
@@ -13,10 +13,12 @@ import { useIsMobile } from '../lib/useIsMobile';
 
 interface HandicapTrendProps {
   events: EventData[];
+  handicapMode: HandicapMode;
   topN?: number;
+  onOpenPlayer?: (playerName: string) => void;
 }
 
-export default memo(function HandicapTrendChart({ events, topN = 12 }: HandicapTrendProps) {
+export default memo(function HandicapTrendChart({ events, handicapMode, topN = 12, onOpenPlayer }: HandicapTrendProps) {
   const sorted = useMemo(() => [...events].sort((a, b) => a.eventNumber - b.eventNumber), [events]);
 
   const topPlayers = useMemo(() => {
@@ -32,10 +34,11 @@ export default memo(function HandicapTrendChart({ events, topN = 12 }: HandicapT
       .map(([name]) => name);
   }, [sorted, topN]);
 
-  const { selected, toggle, clearAll, getLineProps } = useLineSelect(topPlayers);
+  const { selected, toggle, clearAll, getLineProps } = useLineSelect();
   const c = useChartColors();
   const isMobile = useIsMobile();
   const tooltipTrigger = getTooltipTrigger(isMobile);
+  const handicapLabel = handicapMode === 'front-back' ? 'Side Handicap' : 'Handicap';
 
   const chartData = useMemo(() => {
     return sorted.map(ev => {
@@ -57,7 +60,7 @@ export default memo(function HandicapTrendChart({ events, topN = 12 }: HandicapT
     return (
       <div className="chart-container empty-state">
         <h3 className="chart-title">Handicap Trends</h3>
-        <p className="empty-text">Add events to see handicap changes.</p>
+        <p className="empty-text">Add events to see {handicapLabel.toLowerCase()} changes.</p>
       </div>
     );
   }
@@ -65,13 +68,13 @@ export default memo(function HandicapTrendChart({ events, topN = 12 }: HandicapT
   return (
     <div className="chart-container">
       <h3 className="chart-title">Handicap Trends</h3>
-      <p className="chart-subtitle">Handicap per event. {playerScopeLabel}. Click a name below to highlight.</p>
+      <p className="chart-subtitle">{handicapLabel} per event. {playerScopeLabel}. Click a name below to highlight.</p>
       <ResponsiveContainer width="100%" height={380}>
         <LineChart data={chartData} margin={{ top: 10, right: isMobile ? 10 : 30, left: isMobile ? -14 : 0, bottom: 10 }}>
           <CartesianGrid strokeDasharray="3 3" stroke={c.grid} />
           <XAxis dataKey="event" stroke={c.axis} tick={{ fill: c.tick, fontSize: 12 }} />
           <YAxis stroke={c.axis} tick={{ fill: c.tick, fontSize: 12 }}
-            label={isMobile ? undefined : { value: 'Handicap', angle: -90, position: 'insideLeft', fill: c.tick, fontSize: 12 }}
+            label={isMobile ? undefined : { value: handicapLabel, angle: -90, position: 'insideLeft', fill: c.tick, fontSize: 12 }}
           />
           <Tooltip trigger={tooltipTrigger} content={<ChartTooltip selected={selected} sortDir="asc" />} />
           {topPlayers.map(player => (
@@ -86,7 +89,7 @@ export default memo(function HandicapTrendChart({ events, topN = 12 }: HandicapT
           ))}
         </LineChart>
       </ResponsiveContainer>
-      <ClickableLegend players={topPlayers} selected={selected} onToggle={toggle} onClearAll={clearAll} />
+      <ClickableLegend players={topPlayers} selected={selected} onToggle={toggle} onClearAll={clearAll} onOpenPlayer={onOpenPlayer} />
     </div>
   );
 });

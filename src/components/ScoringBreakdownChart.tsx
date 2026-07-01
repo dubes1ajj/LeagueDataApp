@@ -15,6 +15,7 @@ interface ScoringBreakdownProps {
   events: EventData[];
   courseConfig: CourseConfig | null;
   onSetupCourse: () => void;
+  onPlayerClick?: (playerName: string) => void;
 }
 
 const SCORE_KEYS = [
@@ -41,7 +42,7 @@ interface RowData {
   totalPoints: number;
 }
 
-export default memo(function ScoringBreakdownChart({ events, courseConfig, onSetupCourse }: ScoringBreakdownProps) {
+export default memo(function ScoringBreakdownChart({ events, courseConfig, onSetupCourse, onPlayerClick }: ScoringBreakdownProps) {
   const c = useChartColors();
   const isMobile = useIsMobile();
   const tooltipTrigger = getTooltipTrigger(isMobile);
@@ -208,9 +209,9 @@ export default memo(function ScoringBreakdownChart({ events, courseConfig, onSet
         const sortedData = [...chartData].sort((a, b) => {
           const av = a[sortKey as keyof RowData];
           const bv = b[sortKey as keyof RowData];
-          let cmp = 0;
-          if (typeof av === 'string' && typeof bv === 'string') cmp = av.localeCompare(bv);
-          else cmp = (av as number) - (bv as number);
+          const cmp = typeof av === 'string' && typeof bv === 'string'
+            ? av.localeCompare(bv)
+            : (av as number) - (bv as number);
           return sortAsc ? cmp : -cmp;
         });
 
@@ -264,7 +265,15 @@ export default memo(function ScoringBreakdownChart({ events, courseConfig, onSet
                       <tr key={row.fullName} className={idx % 2 === 0 ? 'sc-ct-even' : ''}>
                         <td className="sc-ct-player-cell">
                           <span className="player-dot" style={{ background: getPlayerColor(row.fullName) }} />
-                          {row.name}
+                          {onPlayerClick ? (
+                            <button
+                              className="icon-btn"
+                              style={{ width: 'auto', height: 'auto', padding: 0, color: 'var(--text)', textDecoration: 'underline' }}
+                              onClick={() => onPlayerClick(row.fullName)}
+                            >
+                              {row.name}
+                            </button>
+                          ) : row.name}
                         </td>
                         {SCORE_KEYS.map(({ key, color }) => (
                           <td key={key} className="sc-ct-num-cell">

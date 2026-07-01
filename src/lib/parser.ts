@@ -1,4 +1,4 @@
-import type { EventData, PlayerEventData, StandingEntry } from '../types/golf';
+import type { AdjustedScoringSettings, EventData, PlayerEventData, StandingEntry } from '../types/golf';
 
 /**
  * Parses the HTML from a golfsoftware.com player standings page.
@@ -52,7 +52,7 @@ export function parseGolfSoftwareHTML(html: string): Omit<EventData, 'id'> | nul
 
     // Extract event info from title/header
     const titleEl = doc.querySelector('title, h1, h2');
-    let leagueTitle = titleEl?.textContent?.trim() ?? 'Golf League';
+    const leagueTitle = titleEl?.textContent?.trim() ?? 'Golf League';
     
     // Try to find event number and date from the page header
     let eventNumber = 1;
@@ -194,20 +194,49 @@ export function parseGolfSoftwareHTML(html: string): Omit<EventData, 'id'> | nul
  * After all events are loaded, recalculate cumulative standings per event.
  * Returns updated standings arrays (one per event) based on sum of points.
  */
-export function recalculateCumulativeStandings(events: EventData[]): EventData[] {
+const DEFAULT_ADJUSTED_SCORING: AdjustedScoringSettings = {
+  mode: 'none',
+  dropCount: 0,
+};
+
+function getAdjustedTotal(points: number[], settings: AdjustedScoringSettings): number {
+  if (settings.mode !== 'drop-lowest') {
+    return points.reduce((sum, value) => sum + value, 0);
+  }
+
+  const dropCount = Math.max(0, Math.floor(settings.dropCount));
+  if (dropCount <= 0 || points.length === 0) {
+    return points.reduce((sum, value) => sum + value, 0);
+  }
+
+  const sorted = [...points].sort((a, b) => a - b);
+  const toDrop = Math.min(dropCount, sorted.length);
+  const droppedTotal = sorted.slice(0, toDrop).reduce((sum, value) => sum + value, 0);
+  const rawTotal = points.reduce((sum, value) => sum + value, 0);
+  return rawTotal - droppedTotal;
+}
+
+export function recalculateCumulativeStandings(
+  events: EventData[],
+  adjustedScoring: AdjustedScoringSettings = DEFAULT_ADJUSTED_SCORING,
+): EventData[] {
   const sorted = [...events].sort((a, b) => a.eventNumber - b.eventNumber);
 
-  // cumulativePoints only gains an entry the first time a player actually plays.
-  // Players who have never played any event never appear here.
-  const cumulativePoints: Record<string, number> = {};
+  // Track each player's played-event points so adjusted totals can be derived per snapshot.
+  const pointsByPlayer: Record<string, number[]> = {};
 
   return sorted.map(event => {
-    // Add this event's points — this also introduces new players on their debut
+    // Add this event's points — this also introduces new players on their debut.
     for (const player of event.players) {
       if (!player.didNotPlay) {
-        cumulativePoints[player.playerName] =
-          (cumulativePoints[player.playerName] ?? 0) + player.points;
+        if (!pointsByPlayer[player.playerName]) pointsByPlayer[player.playerName] = [];
+        pointsByPlayer[player.playerName].push(player.points);
       }
+    }
+
+    const cumulativePoints: Record<string, number> = {};
+    for (const [playerName, playedPoints] of Object.entries(pointsByPlayer)) {
+      cumulativePoints[playerName] = getAdjustedTotal(playedPoints, adjustedScoring);
     }
 
     // Sort: by cumulative points desc, then alphabetically for ties

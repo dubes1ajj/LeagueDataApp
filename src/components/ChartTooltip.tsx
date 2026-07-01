@@ -11,6 +11,7 @@ interface ChartTooltipProps {
   payload?: TooltipEntry[];
   label?: string;
   selected: Set<string>;
+  pinnedKeys?: string[];
   /** 'asc' for positions/scores where lower=better, 'desc' for points where higher=better */
   sortDir?: 'asc' | 'desc';
   valueFormat?: (v: number, name: string) => string;
@@ -21,18 +22,23 @@ export function ChartTooltip({
   payload,
   label,
   selected,
+  pinnedKeys = [],
   sortDir = 'desc',
   valueFormat,
 }: ChartTooltipProps) {
   if (!active || !payload?.length) return null;
 
   const hasSelection = selected.size > 0;
+  const pinnedSet = new Set(pinnedKeys);
 
   // When players are selected, only show those in the tooltip; otherwise show all
   const entries = payload
     .filter(p => p.value !== undefined && p.value !== null)
-    .filter(p => !hasSelection || selected.has(p.dataKey as string))
+    .filter(p => !hasSelection || selected.has(p.dataKey as string) || pinnedSet.has(p.dataKey as string))
     .sort((a, b) => {
+      const aPinned = pinnedSet.has(a.dataKey as string);
+      const bPinned = pinnedSet.has(b.dataKey as string);
+      if (aPinned !== bPinned) return aPinned ? -1 : 1;
       const av = (a.value as number) ?? 0;
       const bv = (b.value as number) ?? 0;
       return sortDir === 'asc' ? av - bv : bv - av;

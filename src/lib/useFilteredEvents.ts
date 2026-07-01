@@ -1,5 +1,5 @@
 import { useMemo } from 'react';
-import type { EventData, PlayerConfig, StandingEntry } from '../types/golf';
+import type { AdjustedScoringSettings, EventData, PlayerConfig, StandingEntry } from '../types/golf';
 import { recalculateCumulativeStandings } from './parser';
 
 /**
@@ -7,7 +7,11 @@ import { recalculateCumulativeStandings } from './parser';
  * stripped out, then standings are fully recalculated so positions are
  * contiguous (1, 2, 3… with no gaps) based only on active players.
  */
-export function useFilteredEvents(events: EventData[], config: PlayerConfig): EventData[] {
+export function useFilteredEvents(
+  events: EventData[],
+  config: PlayerConfig,
+  adjustedScoring: AdjustedScoringSettings,
+): EventData[] {
   return useMemo(() => {
     // Step 1: strip inactive players from every event's player list
     const stripped = events.map(ev => ({
@@ -19,6 +23,6 @@ export function useFilteredEvents(events: EventData[], config: PlayerConfig): Ev
 
     // Step 2: recalculate cumulative standings using only the active players
     if (stripped.length === 0) return stripped;
-    return recalculateCumulativeStandings(stripped);
-  }, [events, config]);
+    return recalculateCumulativeStandings(stripped, adjustedScoring);
+  }, [events, config, adjustedScoring]);
 }

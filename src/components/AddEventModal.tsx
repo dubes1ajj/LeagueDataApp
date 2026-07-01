@@ -1,6 +1,6 @@
 import { useMemo, useState } from 'react';
 import { parseGolfSoftwareHTML } from '../lib/parser';
-import type { CourseConfig, EventData, PlayerEventData, StandingEntry } from '../types/golf';
+import type { CourseConfig, EventData, EventWeather, PlayerEventData, StandingEntry } from '../types/golf';
 import { computeBreakdown, getParsForNine } from '../lib/scoring';
 import { X, Upload, Link, PencilLine, Plus, Trash2 } from 'lucide-react';
 
@@ -59,6 +59,11 @@ export default function AddEventModal({ onClose, onAdd, courseConfig, activePlay
   const [manualEventDate, setManualEventDate] = useState('');
   const [manualNine, setManualNine] = useState<'front' | 'back'>('front');
   const [manualPlayers, setManualPlayers] = useState<ManualPlayerRow[]>(() => [createManualPlayerRow()]);
+  const [weatherSummary, setWeatherSummary] = useState('');
+  const [weatherTempF, setWeatherTempF] = useState('');
+  const [weatherFeelsLikeF, setWeatherFeelsLikeF] = useState('');
+  const [weatherPrecipMm, setWeatherPrecipMm] = useState('');
+  const [weatherWindMph, setWeatherWindMph] = useState('');
   const [activeTargetRowId, setActiveTargetRowId] = useState<string | null>(null);
   const [error, setError] = useState('');
   const [loading, setLoading] = useState(false);
@@ -80,7 +85,7 @@ export default function AddEventModal({ onClose, onAdd, courseConfig, activePlay
       setError('Could not parse the HTML. Make sure you pasted the full page source from golfsoftware.com.');
       return;
     }
-    onAdd(parsed);
+    onAdd(withManualWeather(parsed));
   }
 
   function handleHtmlChange(value: string) {
@@ -118,7 +123,7 @@ export default function AddEventModal({ onClose, onAdd, courseConfig, activePlay
         setLoading(false);
         return;
       }
-      onAdd(parsed);
+      onAdd(withManualWeather(parsed));
     } catch (e) {
       setError(`Failed to fetch: ${(e as Error).message}. Try the "Paste HTML" tab if the error persists.`);
       setLoading(false);
@@ -249,7 +254,7 @@ export default function AddEventModal({ onClose, onAdd, courseConfig, activePlay
       position: index + 1,
     }));
 
-    onAdd({
+    onAdd(withManualWeather({
       eventNumber,
       eventDate: formatEventDate(manualEventDate),
       nineHoles: manualNine,
@@ -258,7 +263,94 @@ export default function AddEventModal({ onClose, onAdd, courseConfig, activePlay
         ...player,
         position: player.didNotPlay ? 0 : (positionMap.get(player.playerName) ?? 0),
       })),
-    });
+    }));
+  }
+
+  function buildManualWeather(): EventWeather | undefined {
+    const summary = weatherSummary.trim();
+    const temperatureF = parseDecimal(weatherTempF);
+    const feelsLikeF = parseDecimal(weatherFeelsLikeF);
+    const precipitationMm = parseDecimal(weatherPrecipMm);
+    const windMph = parseDecimal(weatherWindMph);
+
+    if (!summary && temperatureF === null && feelsLikeF === null && precipitationMm === null && windMph === null) {
+      return undefined;
+    }
+
+    return {
+      summary: summary || undefined,
+      temperatureF: temperatureF ?? undefined,
+      feelsLikeF: feelsLikeF ?? undefined,
+      precipitationMm: precipitationMm ?? undefined,
+      windMph: windMph ?? undefined,
+    };
+  }
+
+  function withManualWeather(event: Omit<EventData, 'id'>): Omit<EventData, 'id'> {
+    return {
+      ...event,
+      eventWeather: buildManualWeather(),
+    };
+  }
+
+  function renderWeatherFields() {
+    return (
+      <div className="manual-event-grid" style={{ marginTop: 12 }}>
+        <label className="manual-field" style={{ gridColumn: '1 / -1' }}>
+          <span className="manual-label">Weather Summary (optional)</span>
+          <input
+            className="url-input"
+            value={weatherSummary}
+            onChange={(e) => setWeatherSummary(e.target.value)}
+            placeholder="Sunny, breezy"
+          />
+        </label>
+        <label className="manual-field">
+          <span className="manual-label">Temp (F)</span>
+          <input
+            className="url-input"
+            type="number"
+            step="0.1"
+            value={weatherTempF}
+            onChange={(e) => setWeatherTempF(e.target.value)}
+            placeholder="73"
+          />
+        </label>
+        <label className="manual-field">
+          <span className="manual-label">Feels Like (F)</span>
+          <input
+            className="url-input"
+            type="number"
+            step="0.1"
+            value={weatherFeelsLikeF}
+            onChange={(e) => setWeatherFeelsLikeF(e.target.value)}
+            placeholder="75"
+          />
+        </label>
+        <label className="manual-field">
+          <span className="manual-label">Precip (mm)</span>
+          <input
+            className="url-input"
+            type="number"
+            step="0.1"
+            value={weatherPrecipMm}
+            onChange={(e) => setWeatherPrecipMm(e.target.value)}
+            placeholder="0"
+          />
+        </label>
+        <label className="manual-field">
+          <span className="manual-label">Wind (mph)</span>
+          <input
+            className="url-input"
+            type="number"
+            step="0.1"
+            value={weatherWindMph}
+            onChange={(e) => setWeatherWindMph(e.target.value)}
+            placeholder="8"
+          />
+        </label>
+      </div>
+    );
   }
 
   return (
@@ -303,6 +395,7 @@ export default function AddEventModal({ onClose, onAdd, courseConfig, activePlay
               onChange={e => handleHtmlChange(e.target.value)}
               rows={8}
             />
+            {renderWeatherFields()}
             {error && <p className="error">{error}</p>}
             <div className="modal-actions">
               <button className="btn-secondary" onClick={onClose}>Cancel</button>
@@ -326,6 +419,7 @@ export default function AddEventModal({ onClose, onAdd, courseConfig, activePlay
               value={urlInput}
               onChange={e => setUrlInput(e.target.value)}
             />
+            {renderWeatherFields()}
             {error && <p className="error">{error}</p>}
             <div className="modal-actions">
               <button className="btn-secondary" onClick={onClose}>Cancel</button>
@@ -467,6 +561,7 @@ export default function AddEventModal({ onClose, onAdd, courseConfig, activePlay
             <button type="button" className="btn-secondary manual-add-player" onClick={addManualPlayerRow}>
               <Plus size={14} style={{ marginRight: 6 }} /> Add Player
             </button>
+            {renderWeatherFields()}
             {error && <p className="error">{error}</p>}
             <div className="modal-actions">
               <button className="btn-secondary" onClick={onClose}>Cancel</button>

@@ -3,22 +3,37 @@ import {
   BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip,
   ResponsiveContainer, LabelList
 } from 'recharts';
-import type { EventData } from '../types/golf';
+import type { AdjustedScoringSettings, EventData } from '../types/golf';
 import { getPlayerColor } from '../lib/colors';
 import { useChartColors } from '../lib/useChartColors';
 import { buildDisplayNames } from '../lib/displayNames';
 import { getTooltipTrigger } from '../lib/tooltip';
 import { useIsMobile } from '../lib/useIsMobile';
+import { getEventDisplayName } from '../lib/eventNames';
+import { formatEventDateDisplay } from '../lib/eventDateDisplay';
+import { EVENT_COLOR_PALETTE } from '../lib/eventColors';
 
 // ─── Types ───────────────────────────────────────────────────────────────────
 interface WeeklyPointsChartProps {
   events: EventData[];
+  onPlayerClick?: (playerName: string) => void;
+  rankBasis?: 'adjusted' | 'raw';
+  adjustedScoring?: AdjustedScoringSettings;
+  showBarChart?: boolean;
+  showMatrix?: boolean;
 }
 
 type SortKey = 'total' | number; // number = event index
 
 // ─── Main component ──────────────────────────────────────────────────────────
-export default memo(function WeeklyPointsChart({ events }: WeeklyPointsChartProps) {
+export default memo(function WeeklyPointsChart({
+  events,
+  onPlayerClick,
+  rankBasis = 'raw',
+  adjustedScoring,
+  showBarChart = true,
+  showMatrix = true,
+}: WeeklyPointsChartProps) {
   const [sortKey, setSortKey] = useState<SortKey>('total');
   const c = useChartColors();
   const isMobile = useIsMobile();
@@ -112,13 +127,60 @@ export default memo(function WeeklyPointsChart({ events }: WeeklyPointsChartProp
     return map;
   }, [sorted]);
 
-  const totals = useMemo(() => {
+  const rawTotals = useMemo(() => {
     const t: Record<string, number> = {};
     for (const name of allPlayers) {
       t[name] = Object.values(pointsMap[name] ?? {}).reduce((s, v) => s + v, 0);
     }
     return t;
   }, [allPlayers, pointsMap]);
+
+  const adjustedTotals = useMemo(() => {
+    function getAdjustedTotal(values: number[]): number {
+      if (adjustedScoring?.mode !== 'drop-lowest') {
+        return values.reduce((sum, value) => sum + value, 0);
+      }
+      const dropCount = Math.max(0, Math.floor(adjustedScoring.dropCount ?? 0));
+      if (!dropCount || !values.length) return values.reduce((sum, value) => sum + value, 0);
+      const sortedVals = [...values].sort((a, b) => a - b);
+      const dropped = sortedVals.slice(0, Math.min(dropCount, sortedVals.length)).reduce((sum, value) => sum + value, 0);
+      return values.reduce((sum, value) => sum + value, 0) - dropped;
+    }
+
+    const t: Record<string, number> = {};
+    for (const name of allPlayers) {
+      t[name] = getAdjustedTotal(Object.values(pointsMap[name] ?? {}));
+    }
+    return t;
+  }, [adjustedScoring, allPlayers, pointsMap]);
+
+  const totals = useMemo(() => (rankBasis === 'raw' ? rawTotals : adjustedTotals), [adjustedTotals, rankBasis, rawTotals]);
+
+  const droppedEventNumbersByPlayer = useMemo(() => {
+    const dropped: Record<string, Set<number>> = {};
+    if (rankBasis !== 'adjusted' || adjustedScoring?.mode !== 'drop-lowest') return dropped;
+
+    const dropCount = Math.max(0, Math.floor(adjustedScoring.dropCount ?? 0));
+    if (!dropCount) return dropped;
+
+    for (const name of allPlayers) {
+      const entries = Object.entries(pointsMap[name] ?? {})
+        .map(([eventNumber, points]) => ({ eventNumber: Number(eventNumber), points }))
+        .sort((a, b) => a.points - b.points || a.eventNumber - b.eventNumber);
+      const toDrop = Math.min(dropCount, entries.length);
+      dropped[name] = new Set(entries.slice(0, toDrop).map((entry) => entry.eventNumber));
+    }
+
+    return dropped;
+  }, [adjustedScoring, allPlayers, pointsMap, rankBasis]);
+
+  const eventNameByNumber = useMemo(() => {
+    const map = new Map<number, string>();
+    for (const event of sorted) {
+      map.set(event.eventNumber, getEventDisplayName(event));
+    }
+    return map;
+  }, [sorted]);
 
   // Per-event sorted scores for rank-based heat-map
   // { [eventNumber]: sorted array of scores desc }
@@ -173,12 +235,14 @@ export default memo(function WeeklyPointsChart({ events }: WeeklyPointsChartProp
           fullName: name,
         };
         for (const ev of sorted) {
-          row[`e${ev.eventNumber}`] = pointsMap[name]?.[ev.eventNumber] ?? 0;
+          const rawValue = pointsMap[name]?.[ev.eventNumber] ?? 0;
+          const isDropped = droppedEventNumbersByPlayer[name]?.has(ev.eventNumber) ?? false;
+          row[`e${ev.eventNumber}`] = isDropped ? 0 : rawValue;
         }
         row.total = totals[name] ?? 0;
         return row;
       });
-  }, [allPlayers, sorted, pointsMap, totals, displayNames]);
+  }, [allPlayers, sorted, pointsMap, totals, displayNames, droppedEventNumbersByPlayer]);
 
   if (events.length === 0) {
     return (
@@ -189,90 +253,91 @@ export default memo(function WeeklyPointsChart({ events }: WeeklyPointsChartProp
     );
   }
 
-  // ── Chart colours per event ──────────────────────────────────────────────
-  const EVT_COLORS = [
-    '#4f8ef7','#22c55e','#f59e0b','#a855f7','#ef4444',
-    '#06b6d4','#ec4899','#14b8a6','#f97316','#6366f1',
-  ];
+  if (!showBarChart && !showMatrix) {
+    return null;
+  }
 
+  // ── Chart colours per event ──────────────────────────────────────────────
   return (
     <>
-      {/* ── Stacked horizontal bar chart ─────────────────────────────── */}
-      <div className="chart-container">
-        <h3 className="chart-title">Points by Player (Stacked by Event)</h3>
-        <p className="chart-subtitle">
-          Bar length = cumulative total · each colour = one event
-        </p>
-        <div className="wpc-legend-row">
-          {sorted.map((ev, i) => (
-            <span key={ev.id} className="wpc-ev-badge" style={{ background: EVT_COLORS[i % EVT_COLORS.length] }}>
-              Evt {ev.eventNumber}{ev.eventDate ? ` · ${ev.eventDate}` : ''}
-            </span>
-          ))}
-        </div>
-        <ResponsiveContainer width="100%" height={Math.max(280, barData.length * (isMobile ? 22 : 28))}>
-          <BarChart
-            layout="vertical"
-            data={barData}
-            margin={{ top: 4, right: isMobile ? 36 : 60, left: isMobile ? 4 : 10, bottom: 4 }}
-          >
-            <CartesianGrid strokeDasharray="3 3" stroke={c.grid} horizontal={false} />
-            <XAxis
-              type="number"
-              domain={[0, 'dataMax']}
-              tickCount={isMobile ? 4 : 6}
-              stroke={c.axis}
-              tick={{ fill: c.tick, fontSize: isMobile ? 10 : 11 }}
-            />
-            <YAxis
-              type="category"
-              dataKey="name"
-              width={isMobile ? 72 : 110}
-              interval={0}
-              stroke={c.axis}
-              tick={{ fill: c.tick, fontSize: isMobile ? 10 : 12 }}
-            />
-            <Tooltip
-              trigger={tooltipTrigger}
-              contentStyle={{ background: c.tooltipBg, border: `1px solid ${c.border}`, borderRadius: 8 }}
-              labelStyle={{ color: c.text2, fontWeight: 700 }}
-              formatter={(val, key) => {
-                const evNum = String(key).replace('e', '');
-                return [`${val} pts`, `Event ${evNum}`];
-              }}
-              cursor={{ fill: 'rgba(128,128,128,0.06)' }}
-            />
+      {showBarChart && (
+        <div className="chart-container">
+          <h3 className="chart-title">Points by Player (Stacked by Event)</h3>
+          <p className="chart-subtitle">
+            Bar length = cumulative total · each colour = one event · totals shown as {rankBasis === 'raw' ? 'total points' : 'adjusted points'}
+          </p>
+          <div className="wpc-legend-row">
             {sorted.map((ev, i) => (
-              <Bar
-                key={ev.id}
-                dataKey={`e${ev.eventNumber}`}
-                stackId="pts"
-                fill={EVT_COLORS[i % EVT_COLORS.length]}
-                isAnimationActive={false}
-              >
-                {/* Show total label on the last stacked segment */}
-                {i === sorted.length - 1 && (
-                  <LabelList
-                    dataKey="total"
-                    position="right"
-                    style={{ fill: c.tick, fontSize: isMobile ? 9 : 11 }}
-                    formatter={(v) => (Number(v) > 0 ? String(v) : '')}
-                  />
-                )}
-              </Bar>
+                <span key={ev.id} className="wpc-ev-badge" style={{ background: EVENT_COLOR_PALETTE[i % EVENT_COLOR_PALETTE.length] }}>
+                {getEventDisplayName(ev)}{formatEventDateDisplay(ev.eventDate) ? ` · ${formatEventDateDisplay(ev.eventDate)}` : ''}
+              </span>
             ))}
-          </BarChart>
-        </ResponsiveContainer>
-      </div>
+          </div>
+          <ResponsiveContainer width="100%" height={Math.max(280, barData.length * (isMobile ? 22 : 28))}>
+            <BarChart
+              layout="vertical"
+              data={barData}
+              margin={{ top: 4, right: isMobile ? 36 : 60, left: isMobile ? 4 : 10, bottom: 4 }}
+            >
+              <CartesianGrid strokeDasharray="3 3" stroke={c.grid} horizontal={false} />
+              <XAxis
+                type="number"
+                domain={[0, 'dataMax']}
+                tickCount={isMobile ? 4 : 6}
+                stroke={c.axis}
+                tick={{ fill: c.tick, fontSize: isMobile ? 10 : 11 }}
+              />
+              <YAxis
+                type="category"
+                dataKey="name"
+                width={isMobile ? 72 : 110}
+                interval={0}
+                stroke={c.axis}
+                tick={{ fill: c.tick, fontSize: isMobile ? 10 : 12 }}
+              />
+              <Tooltip
+                trigger={tooltipTrigger}
+                contentStyle={{ background: c.tooltipBg, border: `1px solid ${c.border}`, borderRadius: 8 }}
+                labelStyle={{ color: c.text2, fontWeight: 700 }}
+                formatter={(val, key) => {
+                  const evNum = String(key).replace('e', '');
+                  const num = Number(evNum);
+                  const eventLabel = eventNameByNumber.get(num) ?? `Event ${evNum}`;
+                  return [`${val} pts`, eventLabel];
+                }}
+                cursor={{ fill: 'rgba(128,128,128,0.06)' }}
+              />
+              {sorted.map((ev, i) => (
+                <Bar
+                  key={ev.id}
+                  dataKey={`e${ev.eventNumber}`}
+                  stackId="pts"
+                  fill={EVENT_COLOR_PALETTE[i % EVENT_COLOR_PALETTE.length]}
+                  isAnimationActive={false}
+                >
+                  {i === sorted.length - 1 && (
+                    <LabelList
+                      dataKey="total"
+                      position="right"
+                      style={{ fill: c.tick, fontSize: isMobile ? 9 : 11 }}
+                      formatter={(v) => (Number(v) > 0 ? String(v) : '')}
+                    />
+                  )}
+                </Bar>
+              ))}
+            </BarChart>
+          </ResponsiveContainer>
+        </div>
+      )}
 
-      {/* ── Points matrix table ───────────────────────────────────────── */}
-      <div className="chart-container">
-        <h3 className="chart-title">Points Matrix</h3>
-        <p className="chart-subtitle">
-          Click any column header to sort · blue tint = more points · cells show individual event points
-        </p>
-        <div className="wpc-table-wrap">
-          <table className="wpc-table">
+      {showMatrix && (
+        <div className="chart-container">
+          <h3 className="chart-title">Points Matrix</h3>
+          <p className="chart-subtitle">
+            Click any column header to sort · blue tint = more points · cells show individual event points
+          </p>
+          <div className="wpc-table-wrap">
+            <table className="wpc-table">
             <thead>
               <tr>
                 <th className="wpc-th wpc-th-player">Player</th>
@@ -281,17 +346,17 @@ export default memo(function WeeklyPointsChart({ events }: WeeklyPointsChartProp
                     key={ev.id}
                     className={`wpc-th wpc-th-ev ${sortKey === i ? 'wpc-th-sorted' : ''}`}
                     onClick={() => setSortKey(sortKey === i ? 'total' : i)}
-                    title={ev.eventDate ? `Event ${ev.eventNumber} · ${ev.eventDate}` : undefined}
+                    title={formatEventDateDisplay(ev.eventDate) ? `${getEventDisplayName(ev)} · ${formatEventDateDisplay(ev.eventDate)}` : getEventDisplayName(ev)}
                   >
-                    <span style={{ color: EVT_COLORS[i % EVT_COLORS.length] }}>E{ev.eventNumber}</span>
-                    {ev.eventDate && <span className="wpc-date">{ev.eventDate}</span>}
+                    <span style={{ color: EVENT_COLOR_PALETTE[i % EVENT_COLOR_PALETTE.length] }}>{getEventDisplayName(ev)}</span>
+                    {formatEventDateDisplay(ev.eventDate) && <span className="wpc-date">{formatEventDateDisplay(ev.eventDate)}</span>}
                   </th>
                 ))}
                 <th
                   className={`wpc-th wpc-th-total ${sortKey === 'total' ? 'wpc-th-sorted' : ''}`}
                   onClick={() => setSortKey('total')}
                 >
-                  Total
+                  {rankBasis === 'raw' ? 'Total' : 'Adj Total'}
                 </th>
               </tr>
             </thead>
@@ -302,11 +367,19 @@ export default memo(function WeeklyPointsChart({ events }: WeeklyPointsChartProp
                 return (
                   <tr key={name} className={rowIdx % 2 === 0 ? 'wpc-row-even' : ''}>
                     <td className="wpc-td-player">
-                      <span
-                        className="player-dot"
-                        style={{ background: getPlayerColor(name) }}
-                      />
-                      {displayName}
+                      <span className="player-dot" style={{ background: getPlayerColor(name) }} />
+                      {onPlayerClick ? (
+                        <button
+                          className="icon-btn"
+                          style={{ width: 'auto', height: 'auto', padding: 0, marginLeft: 6, color: 'var(--text)', textDecoration: 'underline' }}
+                          onClick={() => onPlayerClick(name)}
+                          title={`View ${name} profile`}
+                        >
+                          {displayName}
+                        </button>
+                      ) : (
+                        displayName
+                      )}
                     </td>
                     {sorted.map(ev => {
                       const pts = pointsMap[name]?.[ev.eventNumber] ?? null;
@@ -328,9 +401,10 @@ export default memo(function WeeklyPointsChart({ events }: WeeklyPointsChartProp
                 );
               })}
             </tbody>
-          </table>
+            </table>
+          </div>
         </div>
-      </div>
+      )}
     </>
   );
 });

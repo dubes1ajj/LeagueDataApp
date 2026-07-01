@@ -5,7 +5,7 @@ import { useState, useCallback } from 'react';
  * Click a legend item to highlight that player's line; click again to deselect.
  * Multiple players can be selected simultaneously.
  */
-export function useLineSelect(_players: string[]) {
+export function useLineSelect() {
   const [selected, setSelected] = useState<Set<string>>(new Set());
 
   const toggle = useCallback((player: string) => {

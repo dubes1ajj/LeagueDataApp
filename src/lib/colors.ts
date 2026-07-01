@@ -9,13 +9,23 @@ const PALETTE = [
 ];
 
 const colorMap = new Map<string, string>();
+const playerColorOverrides = new Map<string, string>();
 
 export function getPlayerColor(playerName: string): string {
+  if (playerColorOverrides.has(playerName)) return playerColorOverrides.get(playerName)!;
   if (colorMap.has(playerName)) return colorMap.get(playerName)!;
   const idx = colorMap.size % PALETTE.length;
   const color = PALETTE[idx];
   colorMap.set(playerName, color);
   return color;
+}
+
+export function setPlayerColorOverrides(overrides: Record<string, string>): void {
+  playerColorOverrides.clear();
+  for (const [playerName, color] of Object.entries(overrides)) {
+    if (!playerName || !color) continue;
+    playerColorOverrides.set(playerName, color);
+  }
 }
 
 export function resetColors(): void {

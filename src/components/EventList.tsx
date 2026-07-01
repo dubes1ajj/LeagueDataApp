@@ -1,6 +1,8 @@
 
 import type { EventData } from '../types/golf';
 import { Trash2, Calendar, Eye, EyeOff } from 'lucide-react';
+import { getEventDisplayName } from '../lib/eventNames';
+import { formatEventDateDisplay } from '../lib/eventDateDisplay';
 
 interface EventListProps {
   events: EventData[];
@@ -39,8 +41,15 @@ export default function EventList({ events, hiddenEventIds, isAdmin, onRemove, o
           <div key={ev.id} className={`event-item ${hidden ? 'event-item-hidden' : ''}`}>
             <Calendar size={14} className="event-icon" />
             <div className="event-info">
-              <span className="event-name">Event {ev.eventNumber}</span>
-              {ev.eventDate && <span className="event-date">{ev.eventDate}</span>}
+              <span className="event-name">{getEventDisplayName(ev)}</span>
+              {formatEventDateDisplay(ev.eventDate) && <span className="event-date">{formatEventDateDisplay(ev.eventDate)}</span>}
+              {ev.eventWeather && (
+                <span className="event-date">
+                  {ev.eventWeather.summary || 'Weather set'}
+                  {typeof ev.eventWeather.temperatureF === 'number' ? ` • ${ev.eventWeather.temperatureF.toFixed(1)} F` : ''}
+                  {typeof ev.eventWeather.windMph === 'number' ? ` • Wind ${ev.eventWeather.windMph.toFixed(1)} mph` : ''}
+                </span>
+              )}
               <span className="event-players">{ev.players.filter(p => !p.didNotPlay).length} players</span>
             </div>
             <button
@@ -55,7 +64,7 @@ export default function EventList({ events, hiddenEventIds, isAdmin, onRemove, o
                 className="icon-btn danger"
                 title="Remove event"
                 onClick={() => {
-                  if (confirm(`Remove Event ${ev.eventNumber}?`)) onRemove(ev.id);
+                  if (confirm(`Remove ${getEventDisplayName(ev)}?`)) onRemove(ev.id);
                 }}
               >
                 <Trash2 size={14} />

@@ -1,6 +1,8 @@
 import { memo, useMemo, useState } from 'react';
 import { ChevronDown, ChevronUp } from 'lucide-react';
 import type { EventData } from '../types/golf';
+import { getEventDisplayName } from '../lib/eventNames';
+import { formatEventDateDisplay } from '../lib/eventDateDisplay';
 
 interface EventFilterBarProps {
   events: EventData[];
@@ -83,9 +85,9 @@ export default memo(function EventFilterBar({
                 className={`trend-pill event-filter-pill ${selected ? 'active' : ''}`}
                 onClick={() => toggleEvent(event.id)}
               >
-                <span className="event-filter-pill-label">Event {event.eventNumber}</span>
+                <span className="event-filter-pill-label">{getEventDisplayName(event)}</span>
                 <span className="event-filter-pill-meta">
-                  {event.eventDate || 'No date'} · {event.nineHoles === 'front' ? 'Front 9' : 'Back 9'}
+                  {formatEventDateDisplay(event.eventDate) || 'No date'} · {event.nineHoles === 'front' ? 'Front 9' : 'Back 9'}
                 </span>
               </button>
             );

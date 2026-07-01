@@ -16,6 +16,8 @@ interface HoleProfileModalProps {
   events: EventData[];
   courseConfig: CourseConfig | null;
   onClose: () => void;
+  onPlayerClick?: (playerName: string) => void;
+  onShowHole?: (holeNum: number, nine: 'front' | 'back') => void;
 }
 
 const TYPE_COLORS: Record<string, string> = {
@@ -36,9 +38,13 @@ function avgVsParColor(v: number | null): string {
   return '#ef4444';
 }
 
-export default function HoleProfileModal({ holeNum, nine, events, courseConfig, onClose }: HoleProfileModalProps) {
+export default function HoleProfileModal({ holeNum, nine, events, courseConfig, onClose, onPlayerClick, onShowHole }: HoleProfileModalProps) {
   const c = useChartColors();
   const slotIdx = holeNum - (nine === 'back' ? 10 : 1);
+  const minHole = nine === 'back' ? 10 : 1;
+  const maxHole = nine === 'back' ? 18 : 9;
+  const previousHole = holeNum > minHole ? holeNum - 1 : maxHole;
+  const nextHole = holeNum < maxHole ? holeNum + 1 : minHole;
   const pars = courseConfig ? getParsForNine(courseConfig, nine) : null;
   const par = pars ? pars[slotIdx] : null;
 
@@ -99,18 +105,17 @@ export default function HoleProfileModal({ holeNum, nine, events, courseConfig, 
         return b.rounds - a.rounds;
       });
 
-    let previousRank = 0;
-    return ranked.map((entry, index) => {
-      const previous = ranked[index - 1];
-      const rank = previous && previous.avg === entry.avg ? previousRank : index + 1;
-      previousRank = rank;
-      return {
+    return ranked.reduce<Array<typeof ranked[number] & { rank: number; tied: boolean; vsFieldAvg: number | null }>>((acc, entry, index) => {
+      const previous = acc[index - 1];
+      const rank = previous && previous.avg === entry.avg ? previous.rank : index + 1;
+      acc.push({
         ...entry,
         rank,
         tied: (countsByAverage.get(entry.avg.toFixed(2)) ?? 0) > 1,
         vsFieldAvg: overallAvg !== null ? Math.round((entry.avg - overallAvg) * 100) / 100 : null,
-      };
-    });
+      });
+      return acc;
+    }, []);
   }, [overallAvg, relevantEvents, slotIdx, par]);
 
   const displayNames = useMemo(() =>
@@ -197,7 +202,23 @@ export default function HoleProfileModal({ holeNum, nine, events, courseConfig, 
               </p>
             </div>
           </div>
-          <button className="icon-btn" onClick={onClose}><X size={22} /></button>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+            <button
+              className="btn-secondary"
+              onClick={() => onShowHole?.(previousHole, nine)}
+              title={`Show Hole ${previousHole}`}
+            >
+              Previous Hole
+            </button>
+            <button
+              className="btn-secondary"
+              onClick={() => onShowHole?.(nextHole, nine)}
+              title={`Show Hole ${nextHole}`}
+            >
+              Next Hole
+            </button>
+            <button className="icon-btn" onClick={onClose}><X size={22} /></button>
+          </div>
         </div>
 
         <div className="pp-body">
@@ -358,7 +379,15 @@ export default function HoleProfileModal({ holeNum, nine, events, courseConfig, 
                           </td>
                           <td style={{ textAlign: 'left' }}>
                             <span className="player-dot" style={{ background: color }} />
-                            {dispName}
+                            {onPlayerClick ? (
+                              <button
+                                className="icon-btn"
+                                style={{ width: 'auto', height: 'auto', padding: 0, color: 'var(--text)', textDecoration: 'underline' }}
+                                onClick={() => onPlayerClick(ps.name)}
+                              >
+                                {dispName}
+                              </button>
+                            ) : dispName}
                           </td>
                           <td className="pp-sc-hole-cell">{ps.rounds}</td>
                           <td className="pp-sc-hole-cell" style={{ fontWeight: 700 }}>{ps.avg.toFixed(2)}</td>
