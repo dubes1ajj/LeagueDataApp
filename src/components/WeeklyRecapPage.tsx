@@ -380,6 +380,17 @@ export default memo(function WeeklyRecapPage({ events, courseConfig, onPlayerCli
     return `Hole ${holeNum}`;
   }
 
+  function getScoreCellClass(score: number | null, par: number | null) {
+    const diff = score !== null && par !== null ? score - par : null;
+    if (diff === null) return '';
+    if (diff <= -2) return 'pp-sc-eagle';
+    if (diff === -1) return 'pp-sc-birdie';
+    if (diff === 0) return 'pp-sc-par';
+    if (diff === 1) return 'pp-sc-bogey';
+    if (diff === 2) return 'pp-sc-dbl';
+    return 'pp-sc-trpl';
+  }
+
   const scorecardHoleHeaders = useMemo(() => {
     if (!event) return [] as number[];
     const startHole = event.nineHoles === 'back' ? 10 : 1;
@@ -512,9 +523,9 @@ export default memo(function WeeklyRecapPage({ events, courseConfig, onPlayerCli
                     ) : `#${hole}`}
                   </th>
                 ))}
-                <th className="pp-sc-total">Gross</th>
-                <th className="pp-sc-total">Net</th>
-                <th className="pp-sc-total">Pts</th>
+                <th className="pp-sc-total pp-sc-total-gross">Gross</th>
+                <th className="pp-sc-total pp-sc-total-net">Net</th>
+                <th className="pp-sc-total pp-sc-total-pts">Pts</th>
               </tr>
             </thead>
             <tbody>
@@ -522,9 +533,9 @@ export default memo(function WeeklyRecapPage({ events, courseConfig, onPlayerCli
                 <tr>
                   <th className="pp-sc-label pp-sc-par-row">Par</th>
                   {scorecardPars.map((par, index) => <th key={index} className="pp-sc-hole pp-sc-par-cell">{par}</th>)}
-                  <th className="pp-sc-total pp-sc-par-cell">{scorecardPars.reduce((sum, par) => sum + par, 0)}</th>
-                  <th className="pp-sc-total pp-sc-par-cell">-</th>
-                  <th className="pp-sc-total pp-sc-par-cell">-</th>
+                  <th className="pp-sc-total pp-sc-total-gross pp-sc-par-cell">{scorecardPars.reduce((sum, par) => sum + par, 0)}</th>
+                  <th className="pp-sc-total pp-sc-total-net pp-sc-par-cell">-</th>
+                  <th className="pp-sc-total pp-sc-total-pts pp-sc-par-cell">-</th>
                 </tr>
               )}
               {weeklyScorecardRows.map((player) => (
@@ -543,14 +554,7 @@ export default memo(function WeeklyRecapPage({ events, courseConfig, onPlayerCli
                   </td>
                   {player.holes.map((score, index) => {
                     const par = scorecardPars ? scorecardPars[index] : null;
-                    const diff = score !== null && par !== null ? score - par : null;
-                    const cls = diff === null ? ''
-                      : diff <= -2 ? 'pp-sc-eagle'
-                      : diff === -1 ? 'pp-sc-birdie'
-                      : diff === 0 ? 'pp-sc-par'
-                      : diff === 1 ? 'pp-sc-bogey'
-                      : diff === 2 ? 'pp-sc-dbl'
-                      : 'pp-sc-trpl';
+                    const cls = getScoreCellClass(score, par);
 
                     return (
                       <td
@@ -564,9 +568,9 @@ export default memo(function WeeklyRecapPage({ events, courseConfig, onPlayerCli
                       </td>
                     );
                   })}
-                  <td className="pp-sc-total">{player.grossScore ?? '—'}</td>
-                  <td className="pp-sc-total">{player.netScore ?? '—'}</td>
-                  <td className="pp-sc-total pp-sc-pts">{player.points}</td>
+                  <td className="pp-sc-total pp-sc-total-gross">{player.grossScore ?? '—'}</td>
+                  <td className="pp-sc-total pp-sc-total-net">{player.netScore ?? '—'}</td>
+                  <td className="pp-sc-total pp-sc-total-pts pp-sc-pts">{player.points}</td>
                 </tr>
               ))}
             </tbody>

@@ -91,6 +91,26 @@ export interface LeagueWeatherSettings {
   playTime: string; // 24h HH:mm
 }
 
+export type AnalysisMetricKey =
+  | 'pointsForm'
+  | 'netScoring'
+  | 'grossScoring'
+  | 'consistency'
+  | 'birdieRate'
+  | 'damageControl'
+  | 'blowupAvoidance'
+  | 'participation'
+  | 'parEfficiency'
+  | 'eventWins'
+  | 'topThreeRate'
+  | 'topFiveRate'
+  | 'momentum'
+  | 'clutchFactor';
+
+export interface LeagueAnalysisSettings {
+  weights: Record<AnalysisMetricKey, number>;
+}
+
 export interface LeagueData {
   leagueName: string;
   leagueImage?: string;
@@ -98,6 +118,7 @@ export interface LeagueData {
   adjustedScoring: AdjustedScoringSettings;
   eventDateDisplay: EventDateDisplaySettings;
   weatherSettings: LeagueWeatherSettings;
+  analysisSettings: LeagueAnalysisSettings;
   events: EventData[];
 }
 

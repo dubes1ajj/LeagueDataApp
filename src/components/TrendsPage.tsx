@@ -1,5 +1,5 @@
 import { memo } from 'react';
-import type { CourseConfig, EventData, HandicapMode } from '../types/golf';
+import type { CourseConfig, EventData, HandicapMode, LeagueAnalysisSettings } from '../types/golf';
 import EventFilterBar from './EventFilterBar';
 import GrossNetScoresChart from './GrossNetScoresChart';
 import HandicapTrendChart from './HandicapTrendChart';
@@ -10,12 +10,13 @@ interface TrendsPageProps {
   allEvents: EventData[];
   courseConfig: CourseConfig | null;
   handicapMode: HandicapMode;
+  analysisSettings: LeagueAnalysisSettings;
   filterEventIds: string[] | null;
   onFilterChange: (value: string[] | null) => void;
   onPlayerClick?: (playerName: string) => void;
 }
 
-export default memo(function TrendsPage({ events, allEvents, courseConfig, handicapMode, filterEventIds, onFilterChange, onPlayerClick }: TrendsPageProps) {
+export default memo(function TrendsPage({ events, allEvents, courseConfig, handicapMode, analysisSettings, filterEventIds, onFilterChange, onPlayerClick }: TrendsPageProps) {
   return (
     <>
       <EventFilterBar title="Trend Filters" events={allEvents} selectedEventIds={filterEventIds} onChange={onFilterChange} />
@@ -28,7 +29,7 @@ export default memo(function TrendsPage({ events, allEvents, courseConfig, handi
         </div>
       </div>
       <HandicapTrendChart events={events} handicapMode={handicapMode} topN={999} onOpenPlayer={onPlayerClick} />
-      <ComparePlayersPanel events={events} courseConfig={courseConfig} handicapMode={handicapMode} onPlayerClick={onPlayerClick} />
+      <ComparePlayersPanel events={events} courseConfig={courseConfig} handicapMode={handicapMode} analysisSettings={analysisSettings} onPlayerClick={onPlayerClick} />
     </>
   );
 });

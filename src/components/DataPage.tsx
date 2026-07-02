@@ -1,9 +1,11 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import type {
+  AnalysisMetricKey,
   AdjustedScoringSettings,
   EventDateDisplaySettings,
   EventDateFormat,
   EventTimeFormat,
+  LeagueAnalysisSettings,
   LeagueData,
   LeagueWeatherSettings,
   CourseConfig,
@@ -41,6 +43,7 @@ interface DataPageProps {
   onLeagueAdjustedScoringChange: (settings: AdjustedScoringSettings) => void;
   onEventDateDisplayChange: (settings: EventDateDisplaySettings) => void;
   onLeagueWeatherSettingsChange?: (settings: LeagueWeatherSettings) => void;
+  onLeagueAnalysisSettingsChange?: (settings: LeagueAnalysisSettings) => void;
   onClearAllEvents: () => void;
   onLeagueImageChange?: (imageDataUrl: string | null) => void;
   onDeleteLeague?: () => void;
@@ -183,9 +186,119 @@ interface LeagueSettingsSectionProps {
   onLeagueAdjustedScoringChange: (settings: AdjustedScoringSettings) => void;
   onEventDateDisplayChange: (settings: EventDateDisplaySettings) => void;
   onLeagueWeatherSettingsChange: (settings: LeagueWeatherSettings) => void;
+  onLeagueAnalysisSettingsChange: (settings: LeagueAnalysisSettings) => void;
   onClearAllEvents: () => void;
   onDeleteLeague: () => void;
 }
+
+const ANALYSIS_WEIGHT_FIELDS: Array<{ key: AnalysisMetricKey; label: string }> = [
+  { key: 'pointsForm', label: 'Points Form' },
+  { key: 'netScoring', label: 'Net Scoring' },
+  { key: 'grossScoring', label: 'Gross Scoring' },
+  { key: 'consistency', label: 'Consistency' },
+  { key: 'birdieRate', label: 'Birdie Rate' },
+  { key: 'damageControl', label: 'Damage Control' },
+  { key: 'blowupAvoidance', label: 'Blow-Up Avoidance' },
+  { key: 'participation', label: 'Participation' },
+  { key: 'parEfficiency', label: 'Par Efficiency' },
+  { key: 'eventWins', label: 'Event Wins' },
+  { key: 'topThreeRate', label: 'Top-3 Finishes' },
+  { key: 'topFiveRate', label: 'Top-5 Finishes' },
+  { key: 'momentum', label: 'Momentum' },
+  { key: 'clutchFactor', label: 'Clutch Factor' },
+];
+
+const ANALYSIS_WEIGHT_PRESETS: Array<{
+  id: string;
+  name: string;
+  description: string;
+  weights: Record<AnalysisMetricKey, number>;
+}> = [
+  {
+    id: 'balanced',
+    name: 'Balanced',
+    description: 'Even all-around model with scoring, stability, and trend context.',
+    weights: {
+      pointsForm: 0.18,
+      netScoring: 0.14,
+      grossScoring: 0.1,
+      consistency: 0.1,
+      birdieRate: 0.07,
+      damageControl: 0.07,
+      blowupAvoidance: 0.06,
+      participation: 0.04,
+      parEfficiency: 0.06,
+      eventWins: 0.05,
+      topThreeRate: 0.05,
+      topFiveRate: 0.04,
+      momentum: 0.04,
+      clutchFactor: 0.03,
+    },
+  },
+  {
+    id: 'scoring-first',
+    name: 'Scoring First',
+    description: 'Heavily rewards raw and net scoring strength with less trend weighting.',
+    weights: {
+      pointsForm: 0.12,
+      netScoring: 0.2,
+      grossScoring: 0.16,
+      consistency: 0.08,
+      birdieRate: 0.1,
+      damageControl: 0.08,
+      blowupAvoidance: 0.08,
+      participation: 0.03,
+      parEfficiency: 0.07,
+      eventWins: 0.06,
+      topThreeRate: 0.03,
+      topFiveRate: 0.02,
+      momentum: 0.02,
+      clutchFactor: 0.01,
+    },
+  },
+  {
+    id: 'steady-reliable',
+    name: 'Steady Reliable',
+    description: 'Prioritizes consistency, participation, and mistake avoidance.',
+    weights: {
+      pointsForm: 0.14,
+      netScoring: 0.1,
+      grossScoring: 0.06,
+      consistency: 0.18,
+      birdieRate: 0.04,
+      damageControl: 0.12,
+      blowupAvoidance: 0.12,
+      participation: 0.1,
+      parEfficiency: 0.08,
+      eventWins: 0.04,
+      topThreeRate: 0.04,
+      topFiveRate: 0.06,
+      momentum: 0.02,
+      clutchFactor: 0.02,
+    },
+  },
+  {
+    id: 'clutch-run',
+    name: 'Clutch Run',
+    description: 'Boosts late-season surges, recent form, and podium finishes.',
+    weights: {
+      pointsForm: 0.14,
+      netScoring: 0.1,
+      grossScoring: 0.07,
+      consistency: 0.07,
+      birdieRate: 0.07,
+      damageControl: 0.06,
+      blowupAvoidance: 0.08,
+      participation: 0.03,
+      parEfficiency: 0.04,
+      eventWins: 0.1,
+      topThreeRate: 0.08,
+      topFiveRate: 0.05,
+      momentum: 0.14,
+      clutchFactor: 0.1,
+    },
+  },
+];
 
 interface WeatherLocationResult {
   name: string;
@@ -206,6 +319,7 @@ export function LeagueSettingsSection({
   onLeagueAdjustedScoringChange,
   onEventDateDisplayChange,
   onLeagueWeatherSettingsChange,
+  onLeagueAnalysisSettingsChange,
   onClearAllEvents,
   onDeleteLeague,
 }: LeagueSettingsSectionProps) {
@@ -219,6 +333,21 @@ export function LeagueSettingsSection({
   const [locationError, setLocationError] = useState('');
   const fileRef = useRef<HTMLInputElement>(null);
   const canDeleteLeague = availableLeagues.length > 1;
+  const totalAnalysisWeight = useMemo(
+    () => Object.values(league.analysisSettings.weights).reduce((sum, value) => sum + (Number.isFinite(value) ? value : 0), 0),
+    [league.analysisSettings.weights]
+  );
+
+  function updateAnalysisWeight(key: AnalysisMetricKey, value: number) {
+    const nextValue = Number.isFinite(value) ? Math.max(0, value) : 0;
+    onLeagueAnalysisSettingsChange({
+      ...league.analysisSettings,
+      weights: {
+        ...league.analysisSettings.weights,
+        [key]: nextValue,
+      },
+    });
+  }
 
   async function handleLeagueImageFile(file: File) {
     const reader = new FileReader();
@@ -541,6 +670,51 @@ export function LeagueSettingsSection({
           </div>
         </div>
       </div>
+
+      <div className="data-field-row" style={{ marginTop: 12, alignItems: 'flex-start' }}>
+        <label className="data-field-label">Compare Ranking Weights</label>
+        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(170px, 1fr))', gap: 8, flex: 1 }}>
+          <div style={{ gridColumn: '1 / -1', display: 'grid', gap: 8 }}>
+            <div style={{ color: 'var(--text2)', fontSize: 12 }}>Presets</div>
+            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(220px, 1fr))', gap: 8 }}>
+              {ANALYSIS_WEIGHT_PRESETS.map((preset) => (
+                <button
+                  key={preset.id}
+                  className="btn-secondary"
+                  style={{ textAlign: 'left', display: 'grid', gap: 4 }}
+                  onClick={() => onLeagueAnalysisSettingsChange({
+                    ...league.analysisSettings,
+                    weights: { ...preset.weights },
+                  })}
+                >
+                  <span style={{ color: 'var(--text)', fontWeight: 700, fontSize: 13 }}>{preset.name}</span>
+                  <span style={{ color: 'var(--text2)', fontSize: 12 }}>{preset.description}</span>
+                </button>
+              ))}
+            </div>
+          </div>
+          {ANALYSIS_WEIGHT_FIELDS.map((field) => (
+            <div key={field.key}>
+              <label style={{ color: 'var(--text2)', fontSize: 12, display: 'block', marginBottom: 4 }}>{field.label}</label>
+              <input
+                className="url-input"
+                type="number"
+                min={0}
+                step={0.01}
+                value={league.analysisSettings.weights[field.key] ?? 0}
+                onChange={(e) => {
+                  const parsed = Number.parseFloat(e.target.value);
+                  updateAnalysisWeight(field.key, Number.isFinite(parsed) ? parsed : 0);
+                }}
+              />
+            </div>
+          ))}
+          <span style={{ color: 'var(--text2)', fontSize: 12, gridColumn: '1 / -1' }}>
+            Compare Players overall score uses weighted composite metrics. Current total weight: {totalAnalysisWeight.toFixed(2)}.
+          </span>
+        </div>
+      </div>
+
       <div className="data-field-row" style={{ marginTop: 10 }}>
         <label className="data-field-label">Events loaded</label>
         <span style={{ color: 'var(--text2)', fontSize: 13 }}>{league.events.length} event{league.events.length !== 1 ? 's' : ''}</span>
@@ -689,7 +863,7 @@ export default function DataPage({
   activeLeagueId,
   availableLeagues,
   league, courseConfig, playerConfig,
-  onImportSnapshot, onBulkEventsAdded, onLeagueNameChange, onLeagueHandicapModeChange, onLeagueAdjustedScoringChange, onEventDateDisplayChange, onLeagueWeatherSettingsChange, onClearAllEvents, onLeagueImageChange, onDeleteLeague, onCreateLeague,
+  onImportSnapshot, onBulkEventsAdded, onLeagueNameChange, onLeagueHandicapModeChange, onLeagueAdjustedScoringChange, onEventDateDisplayChange, onLeagueWeatherSettingsChange, onLeagueAnalysisSettingsChange, onClearAllEvents, onLeagueImageChange, onDeleteLeague, onCreateLeague,
   hideLeagueSettings = false,
 }: DataPageProps) {
   // ── Bulk URL import ──────────────────────────────────────────────────────
@@ -1034,6 +1208,7 @@ export default function DataPage({
             onLeagueAdjustedScoringChange={onLeagueAdjustedScoringChange}
             onEventDateDisplayChange={onEventDateDisplayChange}
             onLeagueWeatherSettingsChange={onLeagueWeatherSettingsChange ?? (() => {})}
+            onLeagueAnalysisSettingsChange={onLeagueAnalysisSettingsChange ?? (() => {})}
             onClearAllEvents={onClearAllEvents}
             onDeleteLeague={onDeleteLeague ?? (() => {})}
           />

@@ -7,6 +7,7 @@ import type {
   EventDateDisplaySettings,
   EventWeather,
   HandicapMode,
+  LeagueAnalysisSettings,
   LeagueData,
   LeagueWeatherSettings,
   PlayerConfig,
@@ -50,6 +51,7 @@ interface SettingsPageProps {
   onLeagueAdjustedScoringChange: (settings: AdjustedScoringSettings) => void;
   onEventDateDisplayChange: (settings: EventDateDisplaySettings) => void;
   onLeagueWeatherSettingsChange: (settings: LeagueWeatherSettings) => void;
+  onLeagueAnalysisSettingsChange: (settings: LeagueAnalysisSettings) => void;
   onClearAllEvents: () => void;
   onDeleteLeague: () => void;
   onCreateLeague: (leagueId: string, leagueName: string) => void;
@@ -85,6 +87,7 @@ export default memo(function SettingsPage({
   onLeagueAdjustedScoringChange,
   onEventDateDisplayChange,
   onLeagueWeatherSettingsChange,
+  onLeagueAnalysisSettingsChange,
   onClearAllEvents,
   onDeleteLeague,
   onCreateLeague,
@@ -192,6 +195,7 @@ export default memo(function SettingsPage({
               onLeagueAdjustedScoringChange={onLeagueAdjustedScoringChange}
               onEventDateDisplayChange={onEventDateDisplayChange}
               onLeagueWeatherSettingsChange={onLeagueWeatherSettingsChange}
+              onLeagueAnalysisSettingsChange={onLeagueAnalysisSettingsChange}
               onClearAllEvents={onClearAllEvents}
               onDeleteLeague={onDeleteLeague}
             />
@@ -282,6 +286,7 @@ export default memo(function SettingsPage({
               onLeagueHandicapModeChange={onLeagueHandicapModeChange}
               onLeagueAdjustedScoringChange={onLeagueAdjustedScoringChange}
               onEventDateDisplayChange={onEventDateDisplayChange}
+              onLeagueAnalysisSettingsChange={onLeagueAnalysisSettingsChange}
               onClearAllEvents={onClearAllEvents}
               onCreateLeague={onCreateLeague}
               hideLeagueSettings

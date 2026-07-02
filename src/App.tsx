@@ -12,7 +12,7 @@ import {
 import type { BuiltInLeague, LeagueSnapshot } from './lib/storage';
 import { recalculateCumulativeStandings } from './lib/parser';
 import type { EventData, LeagueData, CourseConfig, ColorSchemeConfig, HandicapMode, PlayerConfig } from './types/golf';
-import type { AdjustedScoringSettings, EventDateDisplaySettings, EventWeather, LeagueWeatherSettings } from './types/golf';
+import type { AdjustedScoringSettings, EventDateDisplaySettings, EventWeather, LeagueAnalysisSettings, LeagueWeatherSettings } from './types/golf';
 import AddEventModal from './components/AddEventModal';
 import BumpChart from './components/BumpChart';
 import WeeklyPointsChart from './components/WeeklyPointsChart';
@@ -58,6 +58,24 @@ const DEFAULT_WEATHER_SETTINGS: LeagueWeatherSettings = {
   longitude: null,
   playTime: '17:00',
 };
+const DEFAULT_ANALYSIS_SETTINGS: LeagueAnalysisSettings = {
+  weights: {
+    pointsForm: 0.18,
+    netScoring: 0.14,
+    grossScoring: 0.1,
+    consistency: 0.1,
+    birdieRate: 0.07,
+    damageControl: 0.07,
+    blowupAvoidance: 0.06,
+    participation: 0.04,
+    parEfficiency: 0.06,
+    eventWins: 0.05,
+    topThreeRate: 0.05,
+    topFiveRate: 0.04,
+    momentum: 0.04,
+    clutchFactor: 0.03,
+  },
+};
 const EMPTY_LEAGUE: LeagueData = {
   leagueName: 'Loading…',
   leagueImage: undefined,
@@ -65,6 +83,7 @@ const EMPTY_LEAGUE: LeagueData = {
   adjustedScoring: { ...DEFAULT_ADJUSTED_SCORING },
   eventDateDisplay: { ...DEFAULT_EVENT_DATE_DISPLAY },
   weatherSettings: { ...DEFAULT_WEATHER_SETTINGS },
+  analysisSettings: { ...DEFAULT_ANALYSIS_SETTINGS, weights: { ...DEFAULT_ANALYSIS_SETTINGS.weights } },
   events: [],
 };
 const EMPTY_COLOR_SCHEME: ColorSchemeConfig = { playerColors: {}, eventColors: {}, themeColors: {} };
@@ -144,6 +163,11 @@ export default function App() {
         leagueData = {
           ...leagueData,
           adjustedScoring: { ...DEFAULT_ADJUSTED_SCORING, ...(leagueData.adjustedScoring ?? {}) },
+          analysisSettings: {
+            ...DEFAULT_ANALYSIS_SETTINGS,
+            ...(leagueData.analysisSettings ?? {}),
+            weights: { ...DEFAULT_ANALYSIS_SETTINGS.weights, ...(leagueData.analysisSettings?.weights ?? {}) },
+          },
           events: recalculateCumulativeStandings(leagueData.events, leagueData.adjustedScoring ?? DEFAULT_ADJUSTED_SCORING),
         };
         saveLeagueDataById(activeLeagueId, leagueData);
@@ -158,6 +182,11 @@ export default function App() {
           adjustedScoring: { ...DEFAULT_ADJUSTED_SCORING, ...(snap.league.adjustedScoring ?? {}) },
           eventDateDisplay: { ...DEFAULT_EVENT_DATE_DISPLAY, ...(snap.league.eventDateDisplay ?? {}) },
           weatherSettings: { ...DEFAULT_WEATHER_SETTINGS, ...(snap.league.weatherSettings ?? {}) },
+          analysisSettings: {
+            ...DEFAULT_ANALYSIS_SETTINGS,
+            ...(snap.league.analysisSettings ?? {}),
+            weights: { ...DEFAULT_ANALYSIS_SETTINGS.weights, ...(snap.league.analysisSettings?.weights ?? {}) },
+          },
           events: snap.league.events.map(e => {
             if (!e.nineHoles) return { ...e, nineHoles: 'front' as const };
             return e;
@@ -235,6 +264,7 @@ export default function App() {
       adjustedScoring: { ...DEFAULT_ADJUSTED_SCORING },
       eventDateDisplay: { ...DEFAULT_EVENT_DATE_DISPLAY },
       weatherSettings: { ...DEFAULT_WEATHER_SETTINGS },
+      analysisSettings: { ...DEFAULT_ANALYSIS_SETTINGS, weights: { ...DEFAULT_ANALYSIS_SETTINGS.weights } },
       events: [],
     };
     setLeague(emptyLeague);
@@ -315,6 +345,11 @@ export default function App() {
       ...snap.league,
       adjustedScoring,
       weatherSettings: { ...DEFAULT_WEATHER_SETTINGS, ...(snap.league.weatherSettings ?? {}) },
+      analysisSettings: {
+        ...DEFAULT_ANALYSIS_SETTINGS,
+        ...(snap.league.analysisSettings ?? {}),
+        weights: { ...DEFAULT_ANALYSIS_SETTINGS.weights, ...(snap.league.analysisSettings?.weights ?? {}) },
+      },
       events: recalculateCumulativeStandings(snap.league.events, adjustedScoring),
     };
     setLeague(recalculated);
@@ -331,13 +366,21 @@ export default function App() {
       ...newLeague,
       adjustedScoring,
       weatherSettings: { ...DEFAULT_WEATHER_SETTINGS, ...(newLeague.weatherSettings ?? league.weatherSettings ?? DEFAULT_WEATHER_SETTINGS) },
+      analysisSettings: {
+        ...DEFAULT_ANALYSIS_SETTINGS,
+        ...(newLeague.analysisSettings ?? league.analysisSettings ?? DEFAULT_ANALYSIS_SETTINGS),
+        weights: {
+          ...DEFAULT_ANALYSIS_SETTINGS.weights,
+          ...(newLeague.analysisSettings?.weights ?? league.analysisSettings?.weights ?? DEFAULT_ANALYSIS_SETTINGS.weights),
+        },
+      },
       events: recalculateCumulativeStandings(newLeague.events, adjustedScoring),
     };
     setLeague(recalculatedLeague);
     saveLeagueDataById(activeLeagueId, recalculatedLeague);
     setPlayerConfig(newPlayerConfig);
     savePlayerConfigById(activeLeagueId, newPlayerConfig);
-  }, [activeLeagueId, league.adjustedScoring, league.weatherSettings]);
+  }, [activeLeagueId, league.adjustedScoring, league.weatherSettings, league.analysisSettings]);
 
   const handleLeagueNameChange = useCallback((name: string) => {
     const updated = { ...league, leagueName: name };
@@ -398,6 +441,19 @@ export default function App() {
 
   const handleLeagueWeatherSettingsChange = useCallback((settings: LeagueWeatherSettings) => {
     const updated = { ...league, weatherSettings: { ...settings } };
+    setLeague(updated);
+    saveLeagueDataById(activeLeagueId, updated);
+  }, [activeLeagueId, league]);
+
+  const handleLeagueAnalysisSettingsChange = useCallback((settings: LeagueAnalysisSettings) => {
+    const updated = {
+      ...league,
+      analysisSettings: {
+        ...DEFAULT_ANALYSIS_SETTINGS,
+        ...settings,
+        weights: { ...DEFAULT_ANALYSIS_SETTINGS.weights, ...(settings.weights ?? {}) },
+      },
+    };
     setLeague(updated);
     saveLeagueDataById(activeLeagueId, updated);
   }, [activeLeagueId, league]);
@@ -802,6 +858,7 @@ export default function App() {
               allEvents={filteredEvents}
               courseConfig={courseConfig}
               handicapMode={league.handicapMode}
+              analysisSettings={league.analysisSettings}
               filterEventIds={trendsEventIds}
               onFilterChange={setTrendsEventIds}
               onPlayerClick={setProfilePlayer}
@@ -848,6 +905,7 @@ export default function App() {
               onLeagueAdjustedScoringChange={handleLeagueAdjustedScoringChange}
               onEventDateDisplayChange={handleEventDateDisplayChange}
               onLeagueWeatherSettingsChange={handleLeagueWeatherSettingsChange}
+              onLeagueAnalysisSettingsChange={handleLeagueAnalysisSettingsChange}
               onClearAllEvents={handleClearAllEvents}
               onDeleteLeague={handleDeleteLeague}
               onCreateLeague={handleCreateLeague}

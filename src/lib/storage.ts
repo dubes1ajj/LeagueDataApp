@@ -13,6 +13,25 @@ const DEFAULT_WEATHER_SETTINGS = {
   playTime: '17:00',
 };
 
+const DEFAULT_ANALYSIS_SETTINGS = {
+  weights: {
+    pointsForm: 0.18,
+    netScoring: 0.14,
+    grossScoring: 0.1,
+    consistency: 0.1,
+    birdieRate: 0.07,
+    damageControl: 0.07,
+    blowupAvoidance: 0.06,
+    participation: 0.04,
+    parEfficiency: 0.06,
+    eventWins: 0.05,
+    topThreeRate: 0.05,
+    topFiveRate: 0.04,
+    momentum: 0.04,
+    clutchFactor: 0.03,
+  },
+};
+
 const STORAGE_KEY    = 'golf_tracker_data';
 const COURSE_KEY     = 'golf_tracker_course';
 const PLAYERS_KEY    = 'golf_tracker_players';
@@ -168,6 +187,14 @@ function migrateEvents(data: LeagueData): LeagueData {
     },
     eventDateDisplay: { ...DEFAULT_EVENT_DATE_DISPLAY, ...(data.eventDateDisplay ?? {}) },
     weatherSettings: { ...DEFAULT_WEATHER_SETTINGS, ...(data.weatherSettings ?? {}) },
+    analysisSettings: {
+      ...DEFAULT_ANALYSIS_SETTINGS,
+      ...(data.analysisSettings ?? {}),
+      weights: {
+        ...DEFAULT_ANALYSIS_SETTINGS.weights,
+        ...(data.analysisSettings?.weights ?? {}),
+      },
+    },
     events: data.events.map(e => {
       if (!e.nineHoles) return { ...e, nineHoles: 'front' as const };
       return e;
@@ -370,6 +397,14 @@ export function loadLeagueData(): LeagueData {
       data.handicapMode = data.handicapMode ?? 'general';
       data.eventDateDisplay = { ...DEFAULT_EVENT_DATE_DISPLAY, ...(data.eventDateDisplay ?? {}) };
       data.weatherSettings = { ...DEFAULT_WEATHER_SETTINGS, ...(data.weatherSettings ?? {}) };
+      data.analysisSettings = {
+        ...DEFAULT_ANALYSIS_SETTINGS,
+        ...(data.analysisSettings ?? {}),
+        weights: {
+          ...DEFAULT_ANALYSIS_SETTINGS.weights,
+          ...(data.analysisSettings?.weights ?? {}),
+        },
+      };
       // Migrate old events that predate the nineHoles field
       data.events = data.events.map(e => {
         if (!e.nineHoles) return { ...e, nineHoles: 'front' as const };
@@ -386,6 +421,7 @@ export function loadLeagueData(): LeagueData {
     adjustedScoring: { ...DEFAULT_ADJUSTED_SCORING },
     eventDateDisplay: { ...DEFAULT_EVENT_DATE_DISPLAY },
     weatherSettings: { ...DEFAULT_WEATHER_SETTINGS },
+    analysisSettings: { ...DEFAULT_ANALYSIS_SETTINGS, weights: { ...DEFAULT_ANALYSIS_SETTINGS.weights } },
     events: [],
   };
 }
