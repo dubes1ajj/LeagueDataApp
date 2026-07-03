@@ -3,7 +3,7 @@ import {
   LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer,
   BarChart, Bar, RadarChart, Radar, PolarGrid, PolarAngleAxis, PolarRadiusAxis,
 } from 'recharts';
-import type { CourseConfig, EventData, HandicapMode, LeagueAnalysisSettings } from '../types/golf';
+import type { AnalysisMetricKey, CourseConfig, EventData, HandicapMode, LeagueAnalysisSettings } from '../types/golf';
 import { buildComparePlayerRows } from '../lib/analytics';
 import { getPlayerColor } from '../lib/colors';
 import { useChartColors } from '../lib/useChartColors';
@@ -56,77 +56,124 @@ export default memo(function ComparePlayersPanel({ events, courseConfig, handica
   const displayNames = useMemo(() => buildDisplayNames(players), [players]);
   const [selected, setSelected] = useState<string[]>([]);
   const [showMetricDefinitions, setShowMetricDefinitions] = useState(false);
+  const [historyMetricId, setHistoryMetricId] = useState<AnalysisMetricKey>('eventWins');
+  const [metricContextTarget, setMetricContextTarget] = useState<{ metricId: AnalysisMetricKey; mode: 'player' | 'leaderTimeline'; playerName?: string } | null>(null);
+  const sortedEvents = useMemo(() => [...events].sort((a, b) => a.eventNumber - b.eventNumber), [events]);
 
   const metricDefinitionsContent = useMemo(() => ([
     {
       id: 'pointsForm',
       title: 'Points Form',
       definition: 'How many points a player earns per round on average. Higher means they consistently collect points in your scoring format.',
+      formula: 'avgPoints = totalPoints / roundsPlayed',
     },
     {
       id: 'netScoring',
       title: 'Net Scoring',
       definition: 'Average net score after handicap adjustments. Lower net scores indicate stronger adjusted performance.',
+      formula: 'avgNet = sum(net scores) / roundsWithNet',
     },
     {
       id: 'grossScoring',
       title: 'Gross Scoring',
       definition: 'Average raw strokes before handicap. Lower gross scores indicate better pure shot-making performance.',
+      formula: 'avgGross = sum(gross scores) / roundsWithGross',
     },
     {
       id: 'consistency',
       title: 'Consistency',
       definition: 'How stable a player is week to week in scoring. Uses score variability (net when available, otherwise gross); lower spread means steadier golf.',
+      formula: 'scoreStdDev = sqrt(sum((score - avgScore)^2) / roundsWithScore)',
     },
     {
       id: 'birdieRate',
       title: 'Birdie Rate',
       definition: 'Share of tracked holes finished as birdie or better. Higher values indicate stronger scoring upside.',
+      formula: 'birdieRate = birdies / trackedHoles',
     },
     {
       id: 'damageControl',
       title: 'Damage Control',
       definition: 'How severe a player\'s mistake holes are when they happen, with heavier penalties for doubles, triples, and worse outcomes.',
+      formula: 'weightedPenalty = (1*bogeys + 2*doubleBogeys + 3*tripleBogeys + 4*other) / (4*trackedHoles)',
     },
     {
       id: 'blowupAvoidance',
       title: 'Blow-Up Avoidance',
       definition: 'How often a player avoids blow-up holes (double bogey or worse). Higher values mean fewer major mistakes per hole played.',
+      formula: 'blowupRate = (doubleBogeys + tripleBogeys + other) / trackedHoles',
     },
     {
       id: 'participation',
       title: 'Participation',
       definition: 'How often a player shows up relative to total season rounds. Higher participation rewards availability and reliability.',
+      formula: 'participation = roundsPlayed / totalRoundsInSeason',
     },
     {
       id: 'parEfficiency',
       title: 'Par Efficiency',
       definition: 'Percentage of tracked holes finished at par. Higher values indicate steady, low-variance golf.',
+      formula: 'parEfficiency = pars / trackedHoles',
     },
     {
       id: 'eventWins',
       title: 'Event Wins',
       definition: 'How many events a player wins by points, including tied wins when multiple players share the highest points total.',
+      formula: 'count events where player points = event max points',
     },
     {
       id: 'topThreeRate',
       title: 'Top-3 Finishes',
       definition: 'How many events a player finishes in the top three by points, including ties based on points rank.',
+      formula: 'count events where pointsRank <= 3',
     },
     {
       id: 'topFiveRate',
       title: 'Top-5 Finishes',
       definition: 'How many events a player finishes in the top five by points, including ties based on points rank.',
+      formula: 'count events where pointsRank <= 5',
+    },
+    {
+      id: 'clutchPerformance',
+      title: 'Clutch Holes',
+      definition: 'Performance on the final three holes of each round. Lower average score versus par means a player closes rounds better under pressure.',
+      formula: 'average score versus par across final 3 holes of each round',
+    },
+    {
+      id: 'bounceBack',
+      title: 'Bounce-Back',
+      definition: 'How often a player follows a bogey-or-worse hole with par or better on the next hole. Higher values indicate resilience after mistakes.',
+      formula: 'bounceBackRate = par-or-better next hole / bounce-back chances',
+    },
+    {
+      id: 'cleanCard',
+      title: 'Clean Cards',
+      definition: 'How many rounds a player completes without any double bogey or worse. Higher values reward mistake-free cards.',
+      formula: 'count rounds with no double bogey or worse',
+    },
+    {
+      id: 'ceilingFloor',
+      title: 'Ceiling vs Floor',
+      definition: 'The spread between a player\'s best and worst scoring rounds. Lower spread means a tighter performance range from ceiling to floor.',
+      formula: 'ceilingFloorSpread = worst scoring round - best scoring round',
+    },
+    {
+      id: 'handicapOutperformance',
+      title: 'Handicap Outperformance',
+      definition: 'Average strokes a player finishes under or over net par. Higher values mean they beat their handicap-adjusted expectation more often.',
+      formula: 'average(net par - net score)',
     },
     {
       id: 'momentum',
       title: 'Momentum',
       definition: 'Whether a player improves as the season progresses. Positive momentum means stronger second-half performance than first-half.',
+      formula: 'momentum = secondHalfAvgPoints - firstHalfAvgPoints',
     },
     {
       id: 'clutchFactor',
       title: 'Clutch Factor',
       definition: 'How recent form compares to season average. Higher clutch factor means the player has been stepping up in the most recent rounds.',
+      formula: 'clutchFactor = recentAvgPoints(last 3) - seasonAvgPoints',
     },
   ]), []);
 
@@ -158,7 +205,7 @@ export default memo(function ComparePlayersPanel({ events, courseConfig, handica
     return Array.from(byEvent.values()).sort((a, b) => Number(a.eventNumber) - Number(b.eventNumber));
   }, [rows]);
 
-  const summarizePlayers = useCallback((names: string[], sourceRows: ReturnType<typeof buildComparePlayerRows>) => {
+  const summarizePlayers = useCallback((eventSource: EventData[], names: string[], sourceRows: ReturnType<typeof buildComparePlayerRows>) => {
     return names.map((name) => {
       const playerRows = sourceRows
         .filter(r => r.playerName === name && r.points !== null)
@@ -185,7 +232,27 @@ export default memo(function ComparePlayersPanel({ events, courseConfig, handica
       let currentHcp: number | null = null;
       let bestGross: number | null = null;
       let bestNet: number | null = null;
-      for (const ev of events) {
+      let totalTrackedHoles = 0;
+      let par3DiffTotal = 0;
+      let par3Count = 0;
+      let par4DiffTotal = 0;
+      let par4Count = 0;
+      let par5DiffTotal = 0;
+      let par5Count = 0;
+      let clutchDiffTotal = 0;
+      let clutchHoleCount = 0;
+      let bounceBackSuccess = 0;
+      let bounceBackOpportunities = 0;
+      let cleanCardCount = 0;
+      const frontPoints: number[] = [];
+      const backPoints: number[] = [];
+      const frontNetScores: number[] = [];
+      const backNetScores: number[] = [];
+      const handicapOutperformanceValues: number[] = [];
+      let bestRoundScore: number | null = null;
+      let worstRoundScore: number | null = null;
+
+      for (const ev of eventSource) {
         const p = ev.players.find(x => x.playerName === name && !x.didNotPlay);
         if (!p) continue;
         attendedEvents += 1;
@@ -203,11 +270,24 @@ export default memo(function ComparePlayersPanel({ events, courseConfig, handica
           topFiveByPoints += 1;
         }
 
+        if (ev.nineHoles === 'front') frontPoints.push(p.points);
+        else backPoints.push(p.points);
+        if (p.netScore !== null) {
+          if (ev.nineHoles === 'front') frontNetScores.push(p.netScore);
+          else backNetScores.push(p.netScore);
+        }
+
         currentHcp = p.handicap;
         if (p.grossScore !== null) bestGross = bestGross === null ? p.grossScore : Math.min(bestGross, p.grossScore);
         if (p.netScore !== null) bestNet = bestNet === null ? p.netScore : Math.min(bestNet, p.netScore);
+        const comparableRoundScore = p.netScore ?? p.grossScore;
+        if (comparableRoundScore !== null) {
+          bestRoundScore = bestRoundScore === null ? comparableRoundScore : Math.min(bestRoundScore, comparableRoundScore);
+          worstRoundScore = worstRoundScore === null ? comparableRoundScore : Math.max(worstRoundScore, comparableRoundScore);
+        }
         if (courseConfig) {
-          const bd = computeBreakdown(p.holes, getParsForNine(courseConfig, ev.nineHoles));
+          const parsForNine = getParsForNine(courseConfig, ev.nineHoles);
+          const bd = computeBreakdown(p.holes, parsForNine);
           birdies += bd.birdies;
           pars += bd.pars;
           bogeys += bd.bogeys;
@@ -215,6 +295,42 @@ export default memo(function ComparePlayersPanel({ events, courseConfig, handica
           tripleBogeys += bd.tripleBogeys;
           others += bd.other;
           bogeysOrWorse += bd.bogeys + bd.doubleBogeys + bd.tripleBogeys + bd.other;
+
+          const totalPar = parsForNine.reduce((sum, par) => sum + par, 0);
+          if (p.netScore !== null) {
+            handicapOutperformanceValues.push(totalPar - p.netScore);
+          }
+
+          const holeDiffs = p.holes.map((score, index) => score === null ? null : score - parsForNine[index]);
+          let hasDoublePlus = false;
+          holeDiffs.forEach((diff, index) => {
+            if (diff === null) return;
+            totalTrackedHoles += 1;
+            const parValue = parsForNine[index];
+            if (parValue === 3) {
+              par3DiffTotal += diff;
+              par3Count += 1;
+            } else if (parValue === 4) {
+              par4DiffTotal += diff;
+              par4Count += 1;
+            } else if (parValue === 5) {
+              par5DiffTotal += diff;
+              par5Count += 1;
+            }
+            if (index >= Math.max(0, holeDiffs.length - 3)) {
+              clutchDiffTotal += diff;
+              clutchHoleCount += 1;
+            }
+            if (diff >= 2) hasDoublePlus = true;
+          });
+          for (let index = 0; index < holeDiffs.length - 1; index += 1) {
+            const currentDiff = holeDiffs[index];
+            const nextDiff = holeDiffs[index + 1];
+            if (currentDiff === null || nextDiff === null || currentDiff < 1) continue;
+            bounceBackOpportunities += 1;
+            if (nextDiff <= 0) bounceBackSuccess += 1;
+          }
+          if (!hasDoublePlus) cleanCardCount += 1;
         } else {
           birdies += p.birdies;
           pars += p.pars;
@@ -223,6 +339,8 @@ export default memo(function ComparePlayersPanel({ events, courseConfig, handica
           tripleBogeys += p.tripleBogeys;
           others += p.other;
           bogeysOrWorse += p.bogeys + p.doubleBogeys + p.tripleBogeys + p.other;
+          totalTrackedHoles += p.birdies + p.pars + p.bogeys + p.doubleBogeys + p.tripleBogeys + p.other;
+          if (p.doubleBogeys + p.tripleBogeys + p.other === 0) cleanCardCount += 1;
         }
       }
 
@@ -264,18 +382,36 @@ export default memo(function ComparePlayersPanel({ events, courseConfig, handica
         tripleBogeys,
         others,
         bogeysOrWorse,
+        totalTrackedHoles,
         parEfficiency: totalTracked > 0 ? pars / totalTracked : Number.NaN,
         eventWinsCount: eventWinsByPoints,
         topThreeCount: topThreeByPoints,
         topFiveCount: topFiveByPoints,
+        par3AvgDiff: par3Count > 0 ? par3DiffTotal / par3Count : Number.NaN,
+        par4AvgDiff: par4Count > 0 ? par4DiffTotal / par4Count : Number.NaN,
+        par5AvgDiff: par5Count > 0 ? par5DiffTotal / par5Count : Number.NaN,
+        frontAvgPoints: avg(frontPoints),
+        backAvgPoints: avg(backPoints),
+        frontAvgNet: avg(frontNetScores),
+        backAvgNet: avg(backNetScores),
+        clutchPerformance: clutchHoleCount > 0 ? clutchDiffTotal / clutchHoleCount : Number.NaN,
+        bounceBackRate: bounceBackOpportunities > 0 ? bounceBackSuccess / bounceBackOpportunities : Number.NaN,
+        bounceBackSuccess,
+        bounceBackOpportunities,
+        cleanCardCount,
+        cleanCardRate: attendedEvents > 0 ? cleanCardCount / attendedEvents : Number.NaN,
+        ceilingFloorSpread: bestRoundScore !== null && worstRoundScore !== null ? worstRoundScore - bestRoundScore : Number.NaN,
+        bestRoundScore,
+        worstRoundScore,
+        handicapOutperformance: handicapOutperformanceValues.length ? handicapOutperformanceValues.reduce((sum, value) => sum + value, 0) / handicapOutperformanceValues.length : Number.NaN,
         momentum: firstHalfAvg !== null && secondHalfAvg !== null ? secondHalfAvg - firstHalfAvg : Number.NaN,
         clutchFactor: recentAvg !== null && avg(points) !== null ? recentAvg - (avg(points) ?? 0) : Number.NaN,
       };
     });
-  }, [courseConfig, displayNames, events]);
+  }, [courseConfig, displayNames]);
 
-  const summaryRows = useMemo(() => summarizePlayers(selected, rows), [selected, rows, summarizePlayers]);
-  const fieldSummaryRows = useMemo(() => summarizePlayers(players, allRows), [allRows, players, summarizePlayers]);
+  const summaryRows = useMemo(() => summarizePlayers(sortedEvents, selected, rows), [selected, rows, sortedEvents, summarizePlayers]);
+  const fieldSummaryRows = useMemo(() => summarizePlayers(sortedEvents, players, allRows), [allRows, players, sortedEvents, summarizePlayers]);
 
   const scoringProfileData = useMemo(() => {
     return summaryRows.map((row) => {
@@ -292,40 +428,42 @@ export default memo(function ComparePlayersPanel({ events, courseConfig, handica
       };
     });
   }, [summaryRows]);
-
-  const radarModel = useMemo(() => {
-    const names = summaryRows.map((row) => row.name);
-    const fieldNames = fieldSummaryRows.map((row) => row.name);
-    const pointsByPlayer = Object.fromEntries(fieldSummaryRows.map((row) => [row.name, row.avgPoints ?? 0]));
-    const netByPlayer = Object.fromEntries(fieldSummaryRows.map((row) => [row.name, row.avgNet ?? Number.NaN]));
-    const grossByPlayer = Object.fromEntries(fieldSummaryRows.map((row) => [row.name, row.avgGross ?? Number.NaN]));
-    const consistencyByPlayer = Object.fromEntries(fieldSummaryRows.map((row) => [row.name, row.scoreStdDev ?? Number.NaN]));
-    const seasonRoundsTotal = Math.max(events.length, 1);
-    const roundsByPlayer = Object.fromEntries(fieldSummaryRows.map((row) => [row.name, row.eventsPlayed / seasonRoundsTotal]));
-    const birdieRateByPlayer = Object.fromEntries(fieldSummaryRows.map((row) => {
+  const buildMetricModel = useCallback((selectedSummaryInput: typeof summaryRows, fieldSummaryInput: typeof fieldSummaryRows, seasonEventCount: number) => {
+    const names = selectedSummaryInput.map((row) => row.name);
+    const fieldNames = fieldSummaryInput.map((row) => row.name);
+    const pointsByPlayer = Object.fromEntries(fieldSummaryInput.map((row) => [row.name, row.avgPoints ?? 0]));
+    const netByPlayer = Object.fromEntries(fieldSummaryInput.map((row) => [row.name, row.avgNet ?? Number.NaN]));
+    const grossByPlayer = Object.fromEntries(fieldSummaryInput.map((row) => [row.name, row.avgGross ?? Number.NaN]));
+    const consistencyByPlayer = Object.fromEntries(fieldSummaryInput.map((row) => [row.name, row.scoreStdDev ?? Number.NaN]));
+    const seasonRoundsTotal = Math.max(seasonEventCount, 1);
+    const roundsByPlayer = Object.fromEntries(fieldSummaryInput.map((row) => [row.name, row.eventsPlayed / seasonRoundsTotal]));
+    const birdieRateByPlayer = Object.fromEntries(fieldSummaryInput.map((row) => {
       const totalTracked = row.birdies + row.pars + row.bogeysOrWorse;
       return [row.name, totalTracked > 0 ? row.birdies / totalTracked : Number.NaN];
     }));
-    const damageControlByPlayer = Object.fromEntries(fieldSummaryRows.map((row) => {
+    const damageControlByPlayer = Object.fromEntries(fieldSummaryInput.map((row) => {
       const totalTracked = row.birdies + row.pars + row.bogeysOrWorse;
       if (!totalTracked) return [row.name, Number.NaN];
       const weightedMistakePenalty = (row.bogeys * 1) + (row.doubleBogeys * 2) + (row.tripleBogeys * 3) + (row.others * 4);
       const maxPenalty = totalTracked * 4;
       return [row.name, 1 - (weightedMistakePenalty / maxPenalty)];
     }));
-    const blowupAvoidanceByPlayer = Object.fromEntries(fieldSummaryRows.map((row) => {
+    const blowupAvoidanceByPlayer = Object.fromEntries(fieldSummaryInput.map((row) => {
       const totalTracked = row.birdies + row.pars + row.bogeysOrWorse;
       if (!totalTracked) return [row.name, Number.NaN];
       const blowupHoles = row.doubleBogeys + row.tripleBogeys + row.others;
       return [row.name, 1 - (blowupHoles / totalTracked)];
     }));
-    const parEfficiencyByPlayer = Object.fromEntries(fieldSummaryRows.map((row) => [row.name, row.parEfficiency]));
-    const topThreeByPlayer = Object.fromEntries(fieldSummaryRows.map((row) => [row.name, row.topThreeCount]));
-    const topFiveByPlayer = Object.fromEntries(fieldSummaryRows.map((row) => [row.name, row.topFiveCount]));
-    const momentumByPlayer = Object.fromEntries(fieldSummaryRows.map((row) => [row.name, row.momentum]));
-    const clutchFactorByPlayer = Object.fromEntries(fieldSummaryRows.map((row) => [row.name, row.clutchFactor]));
-
-    const selectedRowsByName = Object.fromEntries(summaryRows.map((row) => [row.name, row]));
+    const parEfficiencyByPlayer = Object.fromEntries(fieldSummaryInput.map((row) => [row.name, row.parEfficiency]));
+    const topThreeByPlayer = Object.fromEntries(fieldSummaryInput.map((row) => [row.name, row.topThreeCount]));
+    const topFiveByPlayer = Object.fromEntries(fieldSummaryInput.map((row) => [row.name, row.topFiveCount]));
+    const clutchPerformanceByPlayer = Object.fromEntries(fieldSummaryInput.map((row) => [row.name, row.clutchPerformance]));
+    const bounceBackByPlayer = Object.fromEntries(fieldSummaryInput.map((row) => [row.name, row.bounceBackRate]));
+    const cleanCardByPlayer = Object.fromEntries(fieldSummaryInput.map((row) => [row.name, row.cleanCardCount]));
+    const ceilingFloorByPlayer = Object.fromEntries(fieldSummaryInput.map((row) => [row.name, row.ceilingFloorSpread]));
+    const handicapOutperformanceByPlayer = Object.fromEntries(fieldSummaryInput.map((row) => [row.name, row.handicapOutperformance]));
+    const momentumByPlayer = Object.fromEntries(fieldSummaryInput.map((row) => [row.name, row.momentum]));
+    const clutchFactorByPlayer = Object.fromEntries(fieldSummaryInput.map((row) => [row.name, row.clutchFactor]));
 
     function normalize(valuesByPlayer: Record<string, number>, domainNames: string[], invert = false): Record<string, number> {
       const vals = domainNames
@@ -357,17 +495,20 @@ export default memo(function ComparePlayersPanel({ events, courseConfig, handica
         return [name, Math.max(CONSISTENCY_MIN_SCORE, normalized)];
       })
     );
-    const roundsScore = Object.fromEntries(
-      fieldNames.map((name) => [name, Math.round((roundsByPlayer[name] ?? 0) * 100)])
-    );
+    const roundsScore = Object.fromEntries(fieldNames.map((name) => [name, Math.round((roundsByPlayer[name] ?? 0) * 100)]));
     const birdieRateScore = normalize(birdieRateByPlayer, fieldNames);
     const damageControlScore = normalize(damageControlByPlayer, fieldNames);
     const blowupAvoidanceScore = normalize(blowupAvoidanceByPlayer, fieldNames);
     const parEfficiencyScore = normalize(parEfficiencyByPlayer, fieldNames);
-    const eventWinsByPlayer = Object.fromEntries(fieldSummaryRows.map((row) => [row.name, row.eventWinsCount]));
+    const eventWinsByPlayer = Object.fromEntries(fieldSummaryInput.map((row) => [row.name, row.eventWinsCount]));
     const eventWinsScore = normalize(eventWinsByPlayer, fieldNames);
     const topThreeRateScore = normalize(topThreeByPlayer, fieldNames);
     const topFiveRateScore = normalize(topFiveByPlayer, fieldNames);
+    const clutchPerformanceScore = normalize(clutchPerformanceByPlayer, fieldNames, true);
+    const bounceBackScore = normalize(bounceBackByPlayer, fieldNames);
+    const cleanCardScore = normalize(cleanCardByPlayer, fieldNames);
+    const ceilingFloorScore = normalize(ceilingFloorByPlayer, fieldNames, true);
+    const handicapOutperformanceScore = normalize(handicapOutperformanceByPlayer, fieldNames);
     const momentumScore = normalize(momentumByPlayer, fieldNames);
     const clutchFactorScore = normalize(clutchFactorByPlayer, fieldNames);
 
@@ -379,7 +520,7 @@ export default memo(function ComparePlayersPanel({ events, courseConfig, handica
       { id: 'birdieRate', label: 'Birdie Rate', score: birdieRateScore, weight: analysisSettings.weights.birdieRate ?? 0.07, detail: (name: string) => Number.isFinite(birdieRateByPlayer[name]) ? `${((birdieRateByPlayer[name] as number) * 100).toFixed(1)}% birdie rate` : 'No hole data' },
       { id: 'damageControl', label: 'Damage Control', score: damageControlScore, weight: analysisSettings.weights.damageControl ?? 0.07, detail: (name: string) => Number.isFinite(damageControlByPlayer[name]) ? `${((damageControlByPlayer[name] as number) * 100).toFixed(1)} weighted damage control` : 'No hole data' },
       { id: 'blowupAvoidance', label: 'Blow-Up Avoidance', score: blowupAvoidanceScore, weight: analysisSettings.weights.blowupAvoidance ?? 0.06, detail: (name: string) => {
-        const player = fieldSummaryRows.find((row) => row.name === name);
+        const player = fieldSummaryInput.find((row) => row.name === name);
         if (!player) return 'No hole data';
         const blowupHoles = player.doubleBogeys + player.tripleBogeys + player.others;
         return `${blowupHoles} blow-up hole${blowupHoles === 1 ? '' : 's'}`;
@@ -389,6 +530,22 @@ export default memo(function ComparePlayersPanel({ events, courseConfig, handica
       { id: 'eventWins', label: 'Event Wins', score: eventWinsScore, weight: analysisSettings.weights.eventWins ?? 0.05, detail: (name: string) => `${eventWinsByPlayer[name] ?? 0} win${(eventWinsByPlayer[name] ?? 0) === 1 ? '' : 's'}` },
       { id: 'topThreeRate', label: 'Top-3 Finishes', score: topThreeRateScore, weight: analysisSettings.weights.topThreeRate ?? 0.05, detail: (name: string) => `${topThreeByPlayer[name] ?? 0} top-3 finish${(topThreeByPlayer[name] ?? 0) === 1 ? '' : 'es'}` },
       { id: 'topFiveRate', label: 'Top-5 Finishes', score: topFiveRateScore, weight: analysisSettings.weights.topFiveRate ?? 0.04, detail: (name: string) => `${topFiveByPlayer[name] ?? 0} top-5 finish${(topFiveByPlayer[name] ?? 0) === 1 ? '' : 'es'}` },
+      { id: 'clutchPerformance', label: 'Clutch Holes', score: clutchPerformanceScore, weight: analysisSettings.weights.clutchPerformance ?? 0.05, detail: (name: string) => Number.isFinite(clutchPerformanceByPlayer[name]) ? `${(clutchPerformanceByPlayer[name] as number).toFixed(2)} avg vs par on final 3` : 'No hole data' },
+      { id: 'bounceBack', label: 'Bounce-Back', score: bounceBackScore, weight: analysisSettings.weights.bounceBack ?? 0.04, detail: (name: string) => {
+        const player = fieldSummaryInput.find((row) => row.name === name);
+        if (!player || player.bounceBackOpportunities === 0) return 'No bounce-back chances';
+        return `${player.bounceBackSuccess}/${player.bounceBackOpportunities} bounce-backs`;
+      } },
+      { id: 'cleanCard', label: 'Clean Cards', score: cleanCardScore, weight: analysisSettings.weights.cleanCard ?? 0.04, detail: (name: string) => {
+        const player = fieldSummaryInput.find((row) => row.name === name);
+        return `${player?.cleanCardCount ?? 0} clean card${(player?.cleanCardCount ?? 0) === 1 ? '' : 's'}`;
+      } },
+      { id: 'ceilingFloor', label: 'Ceiling vs Floor', score: ceilingFloorScore, weight: analysisSettings.weights.ceilingFloor ?? 0.04, detail: (name: string) => {
+        const player = fieldSummaryInput.find((row) => row.name === name);
+        if (!player || !Number.isFinite(player.ceilingFloorSpread)) return 'Not enough rounds';
+        return `best ${player.bestRoundScore?.toFixed(1) ?? '—'} / floor ${player.worstRoundScore?.toFixed(1) ?? '—'} / spread ${player.ceilingFloorSpread.toFixed(1)}`;
+      } },
+      { id: 'handicapOutperformance', label: 'Handicap Outperformance', score: handicapOutperformanceScore, weight: analysisSettings.weights.handicapOutperformance ?? 0.06, detail: (name: string) => Number.isFinite(handicapOutperformanceByPlayer[name]) ? `${(handicapOutperformanceByPlayer[name] as number).toFixed(2)} strokes vs net par` : 'No par data' },
       { id: 'momentum', label: 'Momentum', score: momentumScore, weight: analysisSettings.weights.momentum ?? 0.04, detail: (name: string) => Number.isFinite(momentumByPlayer[name]) ? `${(momentumByPlayer[name] as number).toFixed(2)} pts second-half lift` : 'Not enough rounds' },
       { id: 'clutchFactor', label: 'Clutch Factor', score: clutchFactorScore, weight: analysisSettings.weights.clutchFactor ?? 0.03, detail: (name: string) => Number.isFinite(clutchFactorByPlayer[name]) ? `${(clutchFactorByPlayer[name] as number).toFixed(2)} pts recent-vs-season` : 'Not enough rounds' },
     ] as const;
@@ -416,9 +573,37 @@ export default memo(function ComparePlayersPanel({ events, courseConfig, handica
       weights,
       metricDefinitions,
       scoresByMetricId,
-      selectedRowsByName,
     };
-  }, [summaryRows, fieldSummaryRows, events.length, analysisSettings.weights]);
+  }, [analysisSettings.weights]);
+
+  const radarModel = useMemo(() => buildMetricModel(summaryRows, fieldSummaryRows, events.length), [buildMetricModel, summaryRows, fieldSummaryRows, events.length]);
+
+  const previousFieldSummaryRows = useMemo(() => {
+    if (sortedEvents.length < 2) return [] as typeof fieldSummaryRows;
+    const previousEvents = sortedEvents.slice(0, -1);
+    const previousRows = buildComparePlayerRows(previousEvents, players);
+    return summarizePlayers(previousEvents, players, previousRows);
+  }, [sortedEvents, players, summarizePlayers]);
+
+  const previousFieldSummaryByName = useMemo(
+    () => Object.fromEntries(previousFieldSummaryRows.map((row) => [row.name, row])),
+    [previousFieldSummaryRows]
+  );
+
+  const previousRadarModel = useMemo(
+    () => previousFieldSummaryRows.length ? buildMetricModel(previousFieldSummaryRows, previousFieldSummaryRows, sortedEvents.length - 1) : null,
+    [buildMetricModel, previousFieldSummaryRows, sortedEvents.length]
+  );
+
+  function formatChipDelta(value: number | null) {
+    if (value === null || !Number.isFinite(value) || Math.abs(value) < 1e-9) {
+      return { label: '', className: 'compare-metric-delta compare-metric-delta-neutral' };
+    }
+    return {
+      label: ` (${value > 0 ? '+' : ''}${Math.round(value)})`,
+      className: `compare-metric-delta ${value > 0 ? 'compare-metric-delta-positive' : 'compare-metric-delta-negative'}`,
+    };
+  }
 
   const analysisRanking = useMemo(() => {
     const metricWeightSum = radarModel.metricDefinitions.reduce((sum, metric) => sum + metric.weight, 0);
@@ -444,6 +629,7 @@ export default memo(function ComparePlayersPanel({ events, courseConfig, handica
             eventWins: row.eventWinsCount ?? 0,
             topThreeRate: row.topThreeCount ?? 0,
             topFiveRate: row.topFiveCount ?? 0,
+            cleanCard: row.cleanCardCount ?? 0,
           },
         };
       })
@@ -454,6 +640,212 @@ export default memo(function ComparePlayersPanel({ events, courseConfig, handica
     () => Object.fromEntries(fieldSummaryRows.map((row) => [row.name, row])),
     [fieldSummaryRows]
   );
+
+  const getMetricHistoryValue = useCallback((row: (typeof fieldSummaryRows)[number] | undefined, metricId: AnalysisMetricKey, seasonRounds: number): number | null => {
+    if (!row) return null;
+    const totalTracked = row.totalTrackedHoles || 0;
+    switch (metricId) {
+      case 'pointsForm': return row.avgPoints;
+      case 'netScoring': return row.avgNet;
+      case 'grossScoring': return row.avgGross;
+      case 'consistency': return row.scoreStdDev;
+      case 'birdieRate': return totalTracked ? (row.birdies / totalTracked) * 100 : null;
+      case 'damageControl': {
+        if (!totalTracked) return null;
+        const weightedMistakePenalty = (row.bogeys * 1) + (row.doubleBogeys * 2) + (row.tripleBogeys * 3) + (row.others * 4);
+        return (1 - (weightedMistakePenalty / (totalTracked * 4))) * 100;
+      }
+      case 'blowupAvoidance': {
+        if (!totalTracked) return null;
+        return (1 - ((row.doubleBogeys + row.tripleBogeys + row.others) / totalTracked)) * 100;
+      }
+      case 'participation': return seasonRounds > 0 ? (row.eventsPlayed / seasonRounds) * 100 : null;
+      case 'parEfficiency': return Number.isFinite(row.parEfficiency) ? row.parEfficiency * 100 : null;
+      case 'eventWins': return row.eventWinsCount;
+      case 'topThreeRate': return row.topThreeCount;
+      case 'topFiveRate': return row.topFiveCount;
+      case 'clutchPerformance': return row.clutchPerformance;
+      case 'bounceBack': return Number.isFinite(row.bounceBackRate) ? row.bounceBackRate * 100 : null;
+      case 'cleanCard': return row.cleanCardCount;
+      case 'ceilingFloor': return row.ceilingFloorSpread;
+      case 'handicapOutperformance': return row.handicapOutperformance;
+      case 'momentum': return row.momentum;
+      case 'clutchFactor': return row.clutchFactor;
+      default: return null;
+    }
+  }, []);
+
+  const formatMetricHistoryValue = useCallback((metricId: AnalysisMetricKey, value: number | null): string => {
+    if (value === null || !Number.isFinite(value)) return '—';
+    if (['eventWins', 'topThreeRate', 'topFiveRate', 'cleanCard'].includes(metricId)) return `${Math.round(value)}`;
+    if (['birdieRate', 'damageControl', 'blowupAvoidance', 'participation', 'parEfficiency', 'bounceBack'].includes(metricId)) return `${value.toFixed(1)}%`;
+    return value.toFixed(2);
+  }, []);
+
+  const metricHistoryData = useMemo(() => {
+    if (!selected.length) return [] as Array<Record<string, string | number | null>>;
+    return sortedEvents.map((event, index) => {
+      const prefixEvents = sortedEvents.slice(0, index + 1);
+      const prefixRows = buildComparePlayerRows(prefixEvents, selected);
+      const prefixSummaries = summarizePlayers(prefixEvents, selected, prefixRows);
+      const prefixByName = Object.fromEntries(prefixSummaries.map((row) => [row.name, row]));
+      const point: Record<string, string | number | null> = {
+        event: `E${event.eventNumber}`,
+        eventNumber: event.eventNumber,
+      };
+      selected.forEach((name) => {
+        point[name] = getMetricHistoryValue(prefixByName[name], historyMetricId, prefixEvents.length);
+      });
+      return point;
+    });
+  }, [selected, sortedEvents, summarizePlayers, historyMetricId, getMetricHistoryValue]);
+
+  const metricLeaders = useMemo(() => {
+    return radarModel.metricDefinitions.map((metric) => {
+      const values = fieldSummaryRows.map((row) => ({
+        name: row.name,
+        display: row.display,
+        score: radarModel.scoresByMetricId[metric.id]?.[row.name] ?? 0,
+        detail: metric.detail(row.name),
+      }));
+      const maxScore = Math.max(...values.map((entry) => entry.score));
+      const leaders = values.filter((entry) => entry.score === maxScore);
+      return {
+        id: metric.id,
+        label: metric.label,
+        leaders,
+      };
+    });
+  }, [fieldSummaryRows, radarModel.metricDefinitions, radarModel.scoresByMetricId]);
+
+  const rankExplanations = useMemo(() => {
+    return Object.fromEntries(analysisRanking.map((entry) => {
+      const contributions = radarModel.metricDefinitions.map((metric) => ({
+        id: metric.id,
+        label: metric.label,
+        contribution: (entry.metricScores[metric.id] as number) * metric.weight,
+      }));
+      const strengths = [...contributions].sort((a, b) => b.contribution - a.contribution).slice(0, 3);
+      const weaknesses = [...contributions].sort((a, b) => a.contribution - b.contribution).slice(0, 2);
+      return [entry.name, { strengths, weaknesses }];
+    }));
+  }, [analysisRanking, radarModel.metricDefinitions]);
+
+  const metricContextRows = useMemo<Array<{ eventLabel: string; eventDate: string; summary: string; counted?: boolean }>>(() => {
+    if (!metricContextTarget) return [] as Array<{ eventLabel: string; eventDate: string; summary: string; counted?: boolean }>;
+    if (metricContextTarget.mode === 'leaderTimeline') {
+      return sortedEvents.map((event, index) => {
+        const prefixEvents = sortedEvents.slice(0, index + 1);
+        const prefixRows = buildComparePlayerRows(prefixEvents, players);
+        const prefixSummaries = summarizePlayers(prefixEvents, players, prefixRows);
+        const prefixModel = buildMetricModel(prefixSummaries, prefixSummaries, prefixEvents.length);
+        const metricDefinition = prefixModel.metricDefinitions.find((metric) => metric.id === metricContextTarget.metricId);
+        const values = prefixSummaries.map((row) => ({
+          name: row.name,
+          display: row.display,
+          score: prefixModel.scoresByMetricId[metricContextTarget.metricId]?.[row.name] ?? 0,
+          detail: metricDefinition?.detail(row.name) ?? '—',
+        }));
+        const maxScore = Math.max(...values.map((entry) => entry.score));
+        const leaders = values.filter((entry) => entry.score === maxScore);
+        return {
+          eventLabel: event.eventName?.trim() || `Event ${event.eventNumber}`,
+          eventDate: event.eventDate || '',
+          summary: `${leaders.map((leader) => leader.display).join(', ')} — ${leaders[0]?.detail ?? '—'}`,
+        };
+      });
+    }
+    const playerName = metricContextTarget.playerName;
+    if (!playerName) return [];
+    const playerSummary = fieldSummaryByName[playerName];
+    return sortedEvents.flatMap((event) => {
+      const player = event.players.find((entry) => entry.playerName === playerName && !entry.didNotPlay);
+      if (!player) return [];
+      const eventLabel = event.eventName?.trim() || `Event ${event.eventNumber}`;
+      const eventDate = event.eventDate || '';
+      const activePlayers = event.players.filter((entry) => !entry.didNotPlay);
+      const maxPoints = activePlayers.reduce((max, entry) => Math.max(max, entry.points), Number.NEGATIVE_INFINITY);
+      const pointsRank = activePlayers.filter((entry) => entry.points > player.points).length + 1;
+
+      switch (metricContextTarget.metricId) {
+        case 'eventWins':
+          return [{ eventLabel, eventDate, summary: `${player.points} pts`, counted: player.points === maxPoints }];
+        case 'topThreeRate':
+          return [{ eventLabel, eventDate, summary: `${player.points} pts · rank ${pointsRank}`, counted: pointsRank <= 3 }];
+        case 'topFiveRate':
+          return [{ eventLabel, eventDate, summary: `${player.points} pts · rank ${pointsRank}`, counted: pointsRank <= 5 }];
+        case 'cleanCard': {
+          const clean = player.doubleBogeys + player.tripleBogeys + player.other === 0;
+          return [{ eventLabel, eventDate, summary: clean ? 'No double bogey or worse' : `${player.doubleBogeys + player.tripleBogeys + player.other} double+ holes`, counted: clean }];
+        }
+        case 'damageControl': {
+          const weightedPenalty = (player.bogeys * 1) + (player.doubleBogeys * 2) + (player.tripleBogeys * 3) + (player.other * 4);
+          return [{ eventLabel, eventDate, summary: `${weightedPenalty} weighted penalty points` }];
+        }
+        case 'blowupAvoidance': {
+          const blowupHoles = player.doubleBogeys + player.tripleBogeys + player.other;
+          return [{ eventLabel, eventDate, summary: `${blowupHoles} blow-up hole${blowupHoles === 1 ? '' : 's'}` }];
+        }
+        case 'clutchPerformance': {
+          if (!courseConfig) return [{ eventLabel, eventDate, summary: 'No course scorecard data' }];
+          const parsForNine = getParsForNine(courseConfig, event.nineHoles);
+          const closingDiffs = player.holes.slice(-3).map((score, index) => score === null ? null : score - parsForNine[parsForNine.length - 3 + index]).filter((value): value is number => value !== null);
+          if (!closingDiffs.length) return [{ eventLabel, eventDate, summary: 'No closing-hole data' }];
+          const closingAvg = closingDiffs.reduce((sum, value) => sum + value, 0) / closingDiffs.length;
+          return [{ eventLabel, eventDate, summary: `${closingAvg >= 0 ? '+' : ''}${closingAvg.toFixed(2)} avg vs par on final 3` }];
+        }
+        case 'bounceBack': {
+          if (!courseConfig) return [{ eventLabel, eventDate, summary: 'No course scorecard data' }];
+          const parsForNine = getParsForNine(courseConfig, event.nineHoles);
+          const diffs = player.holes.map((score, index) => score === null ? null : score - parsForNine[index]);
+          let successes = 0;
+          let chances = 0;
+          for (let index = 0; index < diffs.length - 1; index += 1) {
+            const currentDiff = diffs[index];
+            const nextDiff = diffs[index + 1];
+            if (currentDiff === null || nextDiff === null || currentDiff < 1) continue;
+            chances += 1;
+            if (nextDiff <= 0) successes += 1;
+          }
+          return [{ eventLabel, eventDate, summary: chances ? `${successes}/${chances} bounce-backs` : 'No bounce-back chances' }];
+        }
+        case 'ceilingFloor': {
+          const roundScore = player.netScore ?? player.grossScore;
+          if (roundScore === null || !playerSummary) return [{ eventLabel, eventDate, summary: 'No score data' }];
+          const tags = [
+            playerSummary.bestRoundScore === roundScore ? 'ceiling' : null,
+            playerSummary.worstRoundScore === roundScore ? 'floor' : null,
+          ].filter(Boolean).join(' · ');
+          return [{ eventLabel, eventDate, summary: `${roundScore.toFixed(1)}${tags ? ` · ${tags}` : ''}` }];
+        }
+        case 'handicapOutperformance': {
+          if (!courseConfig || player.netScore === null) return [{ eventLabel, eventDate, summary: 'No net-par data' }];
+          const totalPar = getParsForNine(courseConfig, event.nineHoles).reduce((sum, par) => sum + par, 0);
+          const outperformance = totalPar - player.netScore;
+          return [{ eventLabel, eventDate, summary: `${outperformance >= 0 ? '+' : ''}${outperformance.toFixed(1)} vs net par` }];
+        }
+        case 'pointsForm':
+          return [{ eventLabel, eventDate, summary: `${player.points} pts` }];
+        case 'netScoring':
+          return [{ eventLabel, eventDate, summary: player.netScore === null ? 'No net score' : `${player.netScore.toFixed(1)} net` }];
+        case 'grossScoring':
+          return [{ eventLabel, eventDate, summary: player.grossScore === null ? 'No gross score' : `${player.grossScore.toFixed(1)} gross` }];
+        case 'participation':
+          return [{ eventLabel, eventDate, summary: 'Played' }];
+        case 'parEfficiency':
+          return [{ eventLabel, eventDate, summary: `${player.pars} pars` }];
+        case 'birdieRate':
+          return [{ eventLabel, eventDate, summary: `${player.birdies} birdies` }];
+        case 'consistency':
+          return [{ eventLabel, eventDate, summary: `${player.netScore ?? player.grossScore ?? '—'} score posted` }];
+        case 'momentum':
+        case 'clutchFactor':
+          return [{ eventLabel, eventDate, summary: `${player.points} pts` }];
+        default:
+          return [{ eventLabel, eventDate, summary: `${player.points} pts` }];
+      }
+    });
+  }, [metricContextTarget, sortedEvents, fieldSummaryByName, courseConfig, buildMetricModel, players, summarizePlayers]);
 
   return (
     <div className="chart-container">
@@ -598,6 +990,45 @@ export default memo(function ComparePlayersPanel({ events, courseConfig, handica
             ))}
           </div>
 
+          <div className="pp-section-title">Hole-Type Splits</div>
+          {courseConfig ? (
+            <div className="compare-profile-grid">
+              {summaryRows.map((row) => (
+                <div key={`hole-type-${row.name}`} className="compare-profile-card">
+                  <div className="compare-profile-header">
+                    <span className="player-dot compare-selected-dot" style={{ background: getPlayerColor(row.name) }} />
+                    <span className="compare-profile-name">{row.display}</span>
+                  </div>
+                  <div className="compare-profile-stats">
+                    <span><strong>{Number.isFinite(row.par3AvgDiff) ? `${row.par3AvgDiff >= 0 ? '+' : ''}${row.par3AvgDiff.toFixed(2)}` : '—'}</strong> par 3 avg</span>
+                    <span><strong>{Number.isFinite(row.par4AvgDiff) ? `${row.par4AvgDiff >= 0 ? '+' : ''}${row.par4AvgDiff.toFixed(2)}` : '—'}</strong> par 4 avg</span>
+                    <span><strong>{Number.isFinite(row.par5AvgDiff) ? `${row.par5AvgDiff >= 0 ? '+' : ''}${row.par5AvgDiff.toFixed(2)}` : '—'}</strong> par 5 avg</span>
+                  </div>
+                </div>
+              ))}
+            </div>
+          ) : (
+            <p className="pp-no-course">Set a course scorecard to unlock par-3/par-4/par-5 split analysis.</p>
+          )}
+
+          <div className="pp-section-title">Front vs Back Splits</div>
+          <div className="compare-profile-grid">
+            {summaryRows.map((row) => (
+              <div key={`front-back-${row.name}`} className="compare-profile-card">
+                <div className="compare-profile-header">
+                  <span className="player-dot compare-selected-dot" style={{ background: getPlayerColor(row.name) }} />
+                  <span className="compare-profile-name">{row.display}</span>
+                </div>
+                <div className="compare-profile-stats">
+                  <span><strong>{row.frontAvgPoints?.toFixed(1) ?? '—'}</strong> front pts</span>
+                  <span><strong>{row.backAvgPoints?.toFixed(1) ?? '—'}</strong> back pts</span>
+                  <span><strong>{row.frontAvgNet?.toFixed(1) ?? '—'}</strong> front net</span>
+                  <span><strong>{row.backAvgNet?.toFixed(1) ?? '—'}</strong> back net</span>
+                </div>
+              </div>
+            ))}
+          </div>
+
           <div className="pp-section-title">Overall Shape (Normalized 0-100)</div>
           <div className="compare-radar-card">
             <ResponsiveContainer width="100%" height={300}>
@@ -637,25 +1068,6 @@ export default memo(function ComparePlayersPanel({ events, courseConfig, handica
                 />
               </RadarChart>
             </ResponsiveContainer>
-            <div style={{ marginTop: 10, color: 'var(--text2)', fontSize: 12, lineHeight: 1.5 }}>
-              <div><strong style={{ color: 'var(--text)' }}>How to read:</strong> each axis is scored 0-100 against the full season field; only selected players are drawn.</div>
-              <div>Normalization (higher-better): score = 100 * (x - fieldMin) / (fieldMax - fieldMin)</div>
-              <div>Normalization (lower-better): score = 100 * (fieldMax - x) / (fieldMax - fieldMin)</div>
-              <div>Points Form: x = avgPoints = (sum of points across played rounds) / roundsPlayed.</div>
-              <div>Net Scoring: x = avgNet = (sum of net scores) / roundsWithNet.</div>
-              <div>Gross Scoring: x = avgGross = (sum of gross scores) / roundsWithGross.</div>
-              <div>Consistency (field-normalized with floor): scoreStdDev = sqrt(sum((score - avgScore)^2) / roundsWithScore), where score is net when available (otherwise gross). baseScore = 100 * (fieldMaxStdDev - scoreStdDev) / (fieldMaxStdDev - fieldMinStdDev), finalScore = max(10, baseScore).</div>
-              <div>Birdie Rate: x = birdies / trackedHoles.</div>
-              <div>Damage Control: weightedPenalty = (1*bogeys + 2*doubleBogeys + 3*tripleBogeys + 4*other) / (4*trackedHoles), x = 1 - weightedPenalty.</div>
-              <div>Blow-Up Avoidance: blowupRate = (doubleBogeys + tripleBogeys + other) / trackedHoles, x = 1 - blowupRate.</div>
-              <div>Par Efficiency: x = pars / trackedHoles.</div>
-              <div>Event Wins: x = count of events where player points equals the event max (ties included).</div>
-              <div>Top-3 Finishes: x = count of events with pointsRank {'<='} 3 (ties by points included).</div>
-              <div>Top-5 Finishes: x = count of events with pointsRank {'<='} 5 (ties by points included).</div>
-              <div>Momentum: x = secondHalfAvgPoints - firstHalfAvgPoints.</div>
-              <div>Clutch Factor: x = recentAvgPoints(Last 3) - seasonAvgPoints.</div>
-              <div>Participation (not normalized): score = (roundsPlayed / totalRoundsInSeason) * 100.</div>
-            </div>
           </div>
 
           <div className="compare-summary-table-wrap">
@@ -722,10 +1134,60 @@ export default memo(function ComparePlayersPanel({ events, courseConfig, handica
           {radarModel.metricDefinitions.map((metric) => `${metric.label} ${(metric.weight * 100).toFixed(0)}%`).join(', ')}
         </div>
 
+        <div className="pp-section-title">Per-Metric League Leaders</div>
+        <div className="compare-selected-grid" style={{ marginTop: 10 }}>
+          {metricLeaders.map((metric) => (
+            <button
+              key={`leader-${metric.id}`}
+              type="button"
+              className="compare-profile-card"
+              style={{ textAlign: 'left' }}
+              onClick={() => setMetricContextTarget({ metricId: metric.id, mode: 'leaderTimeline' })}
+            >
+              <div className="compare-profile-name" style={{ marginBottom: 8 }}>{metric.label}</div>
+              <div style={{ color: 'var(--text)', fontWeight: 700, marginBottom: 4 }}>
+                {metric.leaders.map((leader) => leader.display).join(', ')}
+              </div>
+              <div style={{ color: 'var(--text2)', fontSize: 12, lineHeight: 1.5 }}>{metric.leaders[0]?.detail ?? '—'}</div>
+            </button>
+          ))}
+        </div>
+
+        {selected.length > 0 && (
+          <>
+            <div className="pp-section-title">Metric History</div>
+            <div style={{ display: 'flex', alignItems: 'center', gap: 10, flexWrap: 'wrap', marginTop: 10, marginBottom: 10 }}>
+              <label style={{ color: 'var(--text2)', fontSize: 12 }}>Metric</label>
+              <select className="url-input" value={historyMetricId} onChange={(e) => setHistoryMetricId(e.target.value as AnalysisMetricKey)} style={{ maxWidth: 260 }}>
+                {radarModel.metricDefinitions.map((metric) => (
+                  <option key={`history-${metric.id}`} value={metric.id}>{metric.label}</option>
+                ))}
+              </select>
+            </div>
+            <ResponsiveContainer width="100%" height={240}>
+              <LineChart data={metricHistoryData} margin={{ top: 8, right: 10, left: isMobile ? -16 : -10, bottom: 4 }}>
+                <CartesianGrid strokeDasharray="3 3" stroke={c.grid} />
+                <XAxis dataKey="event" stroke={c.axis} tick={{ fill: c.tick, fontSize: 11 }} />
+                <YAxis stroke={c.axis} tick={{ fill: c.tick, fontSize: 11 }} />
+                <Tooltip
+                  trigger={tooltipTrigger}
+                  contentStyle={{ background: c.tooltipBg, border: `1px solid ${c.border}`, borderRadius: 8 }}
+                  labelStyle={{ color: c.text2 }}
+                  formatter={(value, name) => [formatMetricHistoryValue(historyMetricId, Number.isFinite(Number(value)) ? Number(value) : null), displayNames[String(name)] ?? String(name)]}
+                />
+                {selected.map((name) => (
+                  <Line key={`history-line-${name}`} type="linear" dataKey={name} name={displayNames[name] ?? name} stroke={getPlayerColor(name)} strokeWidth={2.5} dot={{ r: 3, fill: getPlayerColor(name) }} connectNulls />
+                ))}
+              </LineChart>
+            </ResponsiveContainer>
+          </>
+        )}
+
         <div className="compare-analysis-mobile-list" style={{ marginTop: 14 }}>
           {analysisRanking.map((entry, index) => {
             const row = fieldSummaryByName[entry.name];
             const isSelected = selected.includes(entry.name);
+            const explanation = rankExplanations[entry.name];
             return (
               <div key={`analysis-mobile-${entry.name}`} className={`compare-analysis-mobile-card ${isSelected ? 'compare-selected-row' : ''}`.trim()}>
                 <div className="compare-analysis-mobile-top">
@@ -757,24 +1219,94 @@ export default memo(function ComparePlayersPanel({ events, courseConfig, handica
                   <span>{entry.metricRawCounts.topThreeRate} top-3</span>
                   <span>{entry.metricRawCounts.topFiveRate} top-5</span>
                 </div>
+                <div className="compare-analysis-mobile-summary" style={{ display: 'grid', gap: 4 }}>
+                  <span><strong style={{ color: 'var(--text)' }}>Strengths:</strong> {explanation?.strengths.map((item) => item.label).join(', ')}</span>
+                  <span><strong style={{ color: 'var(--text)' }}>Weaknesses:</strong> {explanation?.weaknesses.map((item) => item.label).join(', ')}</span>
+                </div>
                 <div className="compare-analysis-mobile-metrics">
-                  {radarModel.metricDefinitions.map((metric) => (
-                    <span key={`metric-chip-${entry.name}-${metric.id}`} className="compare-analysis-metric-chip">
-                      {metric.id === 'eventWins'
-                        ? `${metric.label}: ${entry.metricRawCounts.eventWins}`
-                        : metric.id === 'topThreeRate'
-                          ? `${metric.label}: ${entry.metricRawCounts.topThreeRate}`
-                          : metric.id === 'topFiveRate'
-                            ? `${metric.label}: ${entry.metricRawCounts.topFiveRate}`
-                          : `${metric.label}: ${Math.round((entry.metricScores[metric.id] as number) ?? 0)}`}
-                    </span>
-                  ))}
+                  {radarModel.metricDefinitions.map((metric) => {
+                    const previousRow = previousFieldSummaryByName[entry.name];
+                    const previousScore = previousRadarModel?.scoresByMetricId[metric.id]?.[entry.name];
+                    const currentScore = Number(entry.metricScores[metric.id] ?? 0);
+                    const deltaValue = metric.id === 'eventWins'
+                      ? (row?.eventWinsCount ?? 0) - (previousRow?.eventWinsCount ?? 0)
+                      : metric.id === 'topThreeRate'
+                        ? (row?.topThreeCount ?? 0) - (previousRow?.topThreeCount ?? 0)
+                        : metric.id === 'topFiveRate'
+                          ? (row?.topFiveCount ?? 0) - (previousRow?.topFiveCount ?? 0)
+                          : metric.id === 'cleanCard'
+                            ? (row?.cleanCardCount ?? 0) - (previousRow?.cleanCardCount ?? 0)
+                            : previousRadarModel ? currentScore - Number(previousScore ?? 0) : null;
+                    const chipDelta = formatChipDelta(deltaValue);
+                    const chipValue = metric.id === 'eventWins'
+                      ? `${entry.metricRawCounts.eventWins}`
+                      : metric.id === 'topThreeRate'
+                        ? `${entry.metricRawCounts.topThreeRate}`
+                        : metric.id === 'topFiveRate'
+                          ? `${entry.metricRawCounts.topFiveRate}`
+                          : metric.id === 'cleanCard'
+                            ? `${entry.metricRawCounts.cleanCard}`
+                            : `${Math.round(currentScore)}`;
+                    return (
+                      <button
+                        key={`metric-chip-${entry.name}-${metric.id}`}
+                        type="button"
+                        className="compare-analysis-metric-chip"
+                        style={{ textAlign: 'left', cursor: 'pointer' }}
+                        onClick={() => setMetricContextTarget({ playerName: entry.name, metricId: metric.id, mode: 'player' })}
+                      >
+                        {metric.label}: {chipValue}<span className={chipDelta.className}>{chipDelta.label}</span>
+                      </button>
+                    );
+                  })}
                 </div>
               </div>
             );
           })}
         </div>
       </div>
+
+      {metricContextTarget && (
+        <div className="modal-overlay" onClick={() => setMetricContextTarget(null)}>
+          <div className="modal" style={{ maxWidth: 760 }} onClick={(e) => e.stopPropagation()}>
+            <div className="modal-header">
+              <h2>{metricContextTarget.mode === 'leaderTimeline'
+                ? `${radarModel.metricDefinitions.find((metric) => metric.id === metricContextTarget.metricId)?.label ?? 'Metric'} — Leaders by Event`
+                : `${displayNames[metricContextTarget.playerName ?? ''] ?? metricContextTarget.playerName} — ${radarModel.metricDefinitions.find((metric) => metric.id === metricContextTarget.metricId)?.label ?? 'Metric Context'}`}</h2>
+              <button className="icon-btn" onClick={() => setMetricContextTarget(null)}>Close</button>
+            </div>
+            <div className="modal-body" style={{ display: 'grid', gap: 10 }}>
+              <p className="hint" style={{ marginBottom: 0 }}>
+                {metricContextTarget.mode === 'leaderTimeline'
+                  ? 'Event-by-event leader timeline showing who led this metric after each event.'
+                  : 'Event-by-event context showing which rounds drove this metric.'}
+              </p>
+              <div className="compare-summary-table-wrap" style={{ marginTop: 0 }}>
+                <table className="compare-summary-table">
+                  <thead>
+                    <tr>
+                      <th>Event</th>
+                      <th>Date</th>
+                      <th>Context</th>
+                      <th>Counts?</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {metricContextRows.map((row, index) => (
+                      <tr key={`metric-context-${row.eventLabel}-${index}`} className={index % 2 === 0 ? 'compare-even' : ''}>
+                        <td>{row.eventLabel}</td>
+                        <td>{row.eventDate || '—'}</td>
+                        <td>{row.summary}</td>
+                        <td>{typeof row.counted === 'boolean' ? (row.counted ? 'Yes' : 'No') : '—'}</td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
 
       {showMetricDefinitions && (
         <div className="modal-overlay" onClick={() => setShowMetricDefinitions(false)}>
@@ -791,6 +1323,9 @@ export default memo(function ComparePlayersPanel({ events, courseConfig, handica
                 <div key={item.id} className="compare-radar-card" style={{ margin: 0 }}>
                   <div style={{ color: 'var(--text)', fontWeight: 700, marginBottom: 4 }}>{item.title}</div>
                   <div style={{ color: 'var(--text2)', fontSize: 13, lineHeight: 1.5 }}>{item.definition}</div>
+                  <div style={{ color: 'var(--text2)', fontSize: 12, lineHeight: 1.5, marginTop: 6 }}>
+                    <strong style={{ color: 'var(--text)' }}>Formula:</strong> {item.formula}
+                  </div>
                 </div>
               ))}
               <div className="modal-actions" style={{ marginTop: 4 }}>

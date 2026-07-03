@@ -62,24 +62,6 @@ function getDifficultyColor(avgVsPar: number, maxAbsValue: number): string {
   return '#94a3b8';
 }
 
-function getLowScoreGradientColor(value: number, minValue: number, maxValue: number): string {
-  if (maxValue <= minValue) return '#f59e0b';
-  const ratio = Math.max(0, Math.min(1, (value - minValue) / (maxValue - minValue)));
-  if (ratio < 0.5) {
-    return mixHexColors('#dc2626', '#f97316', ratio * 2);
-  }
-  return mixHexColors('#f97316', '#fde68a', (ratio - 0.5) * 2);
-}
-
-function getChaosGradientColor(value: number, minValue: number, maxValue: number): string {
-  if (maxValue <= minValue) return '#f59e0b';
-  const ratio = Math.max(0, Math.min(1, (value - minValue) / (maxValue - minValue)));
-  if (ratio < 0.5) {
-    return mixHexColors('#fde68a', '#f59e0b', ratio * 2);
-  }
-  return mixHexColors('#f59e0b', '#dc2626', (ratio - 0.5) * 2);
-}
-
 export default memo(function WeeklyRecapPage({ events, courseConfig, onPlayerClick, onHoleClick }: WeeklyRecapPageProps) {
   const c = useChartColors();
   const isMobile = useIsMobile();
@@ -138,6 +120,78 @@ export default memo(function WeeklyRecapPage({ events, courseConfig, onPlayerCli
       pointsSpread: points.length ? Math.max(...points) - Math.min(...points) : null,
       netSpread: netScores.length ? Math.max(...netScores) - Math.min(...netScores) : null,
       grossSpread: grossScores.length ? Math.max(...grossScores) - Math.min(...grossScores) : null,
+    };
+  }, [activePlayers, courseConfig, event]);
+
+  const eventMetrics = useMemo(() => {
+    if (!event || !activePlayers.length) return null;
+
+    const pars = courseConfig ? getParsForNine(courseConfig, event.nineHoles) : null;
+    const cleanCardPlayers = activePlayers
+      .filter((player) => player.doubleBogeys + player.tripleBogeys + player.other === 0)
+      .map((player) => player.playerName);
+
+    const damageControlRows = activePlayers.map((player) => {
+      const totalTracked = player.birdies + player.pars + player.bogeys + player.doubleBogeys + player.tripleBogeys + player.other;
+      const weightedMistakePenalty = (player.bogeys * 1) + (player.doubleBogeys * 2) + (player.tripleBogeys * 3) + (player.other * 4);
+      const score = totalTracked > 0 ? 1 - (weightedMistakePenalty / (totalTracked * 4)) : Number.NaN;
+      return { playerName: player.playerName, score };
+    }).filter((row) => Number.isFinite(row.score));
+    const bestDamageControlScore = damageControlRows.length ? Math.max(...damageControlRows.map((row) => row.score)) : null;
+    const bestDamageControlPlayers = bestDamageControlScore === null ? [] : damageControlRows.filter((row) => row.score === bestDamageControlScore).map((row) => row.playerName);
+
+    const bounceBackRows = pars ? activePlayers.map((player) => {
+      const diffs = player.holes.map((score, index) => score === null ? null : score - pars[index]);
+      let successes = 0;
+      let chances = 0;
+      for (let index = 0; index < diffs.length - 1; index += 1) {
+        const currentDiff = diffs[index];
+        const nextDiff = diffs[index + 1];
+        if (currentDiff === null || nextDiff === null || currentDiff < 1) continue;
+        chances += 1;
+        if (nextDiff <= 0) successes += 1;
+      }
+      return {
+        playerName: player.playerName,
+        chances,
+        successes,
+        rate: chances > 0 ? successes / chances : Number.NaN,
+      };
+    }).filter((row) => row.chances > 0) : [];
+    const bestBounceBackRate = bounceBackRows.length ? Math.max(...bounceBackRows.map((row) => row.rate)) : null;
+    const bestBounceBackPlayers = bestBounceBackRate === null ? [] : bounceBackRows.filter((row) => row.rate === bestBounceBackRate).map((row) => row.playerName);
+    const bestBounceBackDetail = bestBounceBackRate === null ? null : bounceBackRows.find((row) => row.rate === bestBounceBackRate) ?? null;
+
+    const clutchRows = pars ? activePlayers.map((player) => {
+      const closingDiffs = player.holes.slice(-3)
+        .map((score, index) => score === null ? null : score - pars[pars.length - 3 + index])
+        .filter((value): value is number => value !== null);
+      const averageDiff = closingDiffs.length ? closingDiffs.reduce((sum, value) => sum + value, 0) / closingDiffs.length : Number.NaN;
+      return { playerName: player.playerName, averageDiff };
+    }).filter((row) => Number.isFinite(row.averageDiff)) : [];
+    const bestClutchScore = clutchRows.length ? Math.min(...clutchRows.map((row) => row.averageDiff)) : null;
+    const bestClutchPlayers = bestClutchScore === null ? [] : clutchRows.filter((row) => row.averageDiff === bestClutchScore).map((row) => row.playerName);
+
+    const handicapRows = pars ? activePlayers
+      .filter((player): player is typeof player & { netScore: number } => player.netScore !== null)
+      .map((player) => {
+        const totalPar = pars.reduce((sum, par) => sum + par, 0);
+        return { playerName: player.playerName, outperformance: totalPar - player.netScore };
+      }) : [];
+    const bestHandicapOutperformance = handicapRows.length ? Math.max(...handicapRows.map((row) => row.outperformance)) : null;
+    const bestHandicapPlayers = bestHandicapOutperformance === null ? [] : handicapRows.filter((row) => row.outperformance === bestHandicapOutperformance).map((row) => row.playerName);
+
+    return {
+      cleanCardPlayers,
+      bestDamageControlScore,
+      bestDamageControlPlayers,
+      bestBounceBackPlayers,
+      bestBounceBackDetail,
+      bestClutchPlayers,
+      bestClutchScore,
+      bestHandicapPlayers,
+      bestHandicapOutperformance,
+      hasParData: !!pars,
     };
   }, [activePlayers, courseConfig, event]);
 
@@ -404,46 +458,6 @@ export default memo(function WeeklyRecapPage({ events, courseConfig, onPlayerCli
 
   const leaderChartData = useMemo(() => pointsLeaderboard.slice(0, 5), [pointsLeaderboard]);
 
-  const strugglerChartData = useMemo(() => {
-    return [...roundPlayerStats]
-      .sort((a, b) => a.points - b.points || (b.netScore ?? 0) - (a.netScore ?? 0) || a.playerName.localeCompare(b.playerName))
-      .slice(0, 5)
-      .map((player) => ({
-        playerName: player.playerName,
-        displayName: player.displayName,
-        points: player.points,
-        netScore: player.netScore,
-      }));
-  }, [roundPlayerStats]);
-
-  const strugglerPointsBounds = useMemo(() => {
-    if (!strugglerChartData.length) return { min: 0, max: 0 };
-    return {
-      min: Math.min(...strugglerChartData.map((player) => player.points)),
-      max: Math.max(...strugglerChartData.map((player) => player.points)),
-    };
-  }, [strugglerChartData]);
-
-  const chaosChartData = useMemo(() => {
-    return [...roundPlayerStats]
-      .sort((a, b) => b.bogeysOrWorse - a.bogeysOrWorse || b.volatility - a.volatility || a.playerName.localeCompare(b.playerName))
-      .slice(0, 5)
-      .map((player) => ({
-        playerName: player.playerName,
-        displayName: player.displayName,
-        bogeysOrWorse: player.bogeysOrWorse,
-        volatility: player.volatility,
-      }));
-  }, [roundPlayerStats]);
-
-  const chaosBounds = useMemo(() => {
-    if (!chaosChartData.length) return { min: 0, max: 0 };
-    return {
-      min: Math.min(...chaosChartData.map((player) => player.bogeysOrWorse)),
-      max: Math.max(...chaosChartData.map((player) => player.bogeysOrWorse)),
-    };
-  }, [chaosChartData]);
-
   if (!recaps.length || !recap) {
     return (
       <div className="chart-container empty-state">
@@ -499,6 +513,35 @@ export default memo(function WeeklyRecapPage({ events, courseConfig, onPlayerCli
           <span className="recap-stat-label">Net Spread</span>
           <span className="recap-stat-value">{recapStats?.netSpread ?? '—'}</span>
           <span className="recap-stat-detail">Best to worst net score</span>
+        </div>
+      </div>
+
+      <div className="pp-section-title">Event Metrics</div>
+      <div className="story-grid recap-story-grid recap-story-grid-secondary">
+        <div className={`story-card recap-story-card ${eventMetrics?.cleanCardPlayers.length ? 'story-good' : 'story-neutral'}`}>
+          <span className="story-title">Clean Cards</span>
+          <span className="story-value">{eventMetrics ? eventMetrics.cleanCardPlayers.length : '—'}</span>
+          <span className="story-detail">{eventMetrics?.cleanCardPlayers.length ? renderPlayerNames(eventMetrics.cleanCardPlayers) : 'No double+ free rounds this week'}</span>
+        </div>
+        <div className={`story-card recap-story-card ${eventMetrics?.bestDamageControlPlayers.length ? 'story-good' : 'story-neutral'}`}>
+          <span className="story-title">Best Damage Control</span>
+          <span className="story-value">{eventMetrics?.bestDamageControlPlayers.length ? renderPlayerNames(eventMetrics.bestDamageControlPlayers) : '—'}</span>
+          <span className="story-detail">{eventMetrics?.bestDamageControlScore !== null && eventMetrics?.bestDamageControlScore !== undefined ? `${(eventMetrics.bestDamageControlScore * 100).toFixed(1)} weighted control` : 'No scoring data'}</span>
+        </div>
+        <div className={`story-card recap-story-card ${eventMetrics?.bestBounceBackPlayers.length ? 'story-good' : 'story-neutral'}`}>
+          <span className="story-title">Bounce-Back Leader</span>
+          <span className="story-value">{eventMetrics?.bestBounceBackPlayers.length ? renderPlayerNames(eventMetrics.bestBounceBackPlayers) : '—'}</span>
+          <span className="story-detail">{eventMetrics?.bestBounceBackDetail ? `${eventMetrics.bestBounceBackDetail.successes}/${eventMetrics.bestBounceBackDetail.chances} bounce-backs` : 'Need course pars and bounce-back chances'}</span>
+        </div>
+        <div className={`story-card recap-story-card ${eventMetrics?.bestClutchPlayers.length ? 'story-good' : 'story-neutral'}`}>
+          <span className="story-title">Best Closer</span>
+          <span className="story-value">{eventMetrics?.bestClutchPlayers.length ? renderPlayerNames(eventMetrics.bestClutchPlayers) : '—'}</span>
+          <span className="story-detail">{eventMetrics?.bestClutchScore !== null && eventMetrics?.bestClutchScore !== undefined ? `${eventMetrics.bestClutchScore >= 0 ? '+' : ''}${eventMetrics.bestClutchScore.toFixed(2)} avg vs par on final 3` : 'Need course pars for clutch analysis'}</span>
+        </div>
+        <div className={`story-card recap-story-card ${eventMetrics?.bestHandicapPlayers.length ? 'story-good' : 'story-neutral'}`}>
+          <span className="story-title">Best Handicap Beat</span>
+          <span className="story-value">{eventMetrics?.bestHandicapPlayers.length ? renderPlayerNames(eventMetrics.bestHandicapPlayers) : '—'}</span>
+          <span className="story-detail">{eventMetrics?.bestHandicapOutperformance !== null && eventMetrics?.bestHandicapOutperformance !== undefined ? `${eventMetrics.bestHandicapOutperformance >= 0 ? '+' : ''}${eventMetrics.bestHandicapOutperformance.toFixed(1)} vs net par` : 'Need course pars and net scores'}</span>
         </div>
       </div>
 
@@ -629,35 +672,6 @@ export default memo(function WeeklyRecapPage({ events, courseConfig, onPlayerCli
       </div>
 
       <div className="pp-section-title">Round Strugglers</div>
-      <div className="recap-chart-card recap-inline-chart-card">
-        <p className="pp-chart-label">Bottom of the points sheet</p>
-        <ResponsiveContainer width="100%" height={Math.max(220, strugglerChartData.length * 34)}>
-          <BarChart data={strugglerChartData} layout="vertical" margin={{ top: 6, right: 12, left: isMobile ? 0 : 8, bottom: 6 }}>
-            <CartesianGrid strokeDasharray="3 3" stroke={c.grid} />
-            <XAxis type="number" stroke={c.axis} tick={{ fill: c.tick, fontSize: 11 }} />
-            <YAxis dataKey="displayName" type="category" stroke={c.axis} tick={{ fill: c.tick, fontSize: 11 }} width={isMobile ? 68 : 80} />
-            <Tooltip
-              trigger={tooltipTrigger}
-              contentStyle={{ background: c.tooltipBg, border: `1px solid ${c.border}`, borderRadius: 8 }}
-              labelStyle={{ color: c.text2 }}
-              formatter={(value, name, entry: { payload?: { netScore: number | null } }) => {
-                if (name === 'points') {
-                  return [`${Number(value ?? 0)} pts`, `Net ${entry.payload?.netScore ?? '—'}`];
-                }
-                return [value, name];
-              }}
-            />
-            <Bar dataKey="points" radius={[0, 8, 8, 0]}>
-              {strugglerChartData.map((player) => (
-                <Cell
-                  key={player.playerName}
-                  fill={getLowScoreGradientColor(player.points, strugglerPointsBounds.min, strugglerPointsBounds.max)}
-                />
-              ))}
-            </Bar>
-          </BarChart>
-        </ResponsiveContainer>
-      </div>
       <div className="story-grid recap-story-grid">
         <div className={`story-card recap-story-card ${roundStrugglers?.mostPointsLeftBehind ? 'story-warn' : 'story-neutral'}`}>
           <span className="story-title">Fewest Points Won</span>
@@ -747,35 +761,6 @@ export default memo(function WeeklyRecapPage({ events, courseConfig, onPlayerCli
       </div>
 
       <div className="pp-section-title">Weekly Chaos</div>
-      <div className="recap-chart-card recap-inline-chart-card">
-        <p className="pp-chart-label">Chaos meter</p>
-        <ResponsiveContainer width="100%" height={Math.max(220, chaosChartData.length * 34)}>
-          <BarChart data={chaosChartData} layout="vertical" margin={{ top: 6, right: 12, left: isMobile ? 0 : 8, bottom: 6 }}>
-            <CartesianGrid strokeDasharray="3 3" stroke={c.grid} />
-            <XAxis type="number" stroke={c.axis} tick={{ fill: c.tick, fontSize: 11 }} />
-            <YAxis dataKey="displayName" type="category" stroke={c.axis} tick={{ fill: c.tick, fontSize: 11 }} width={isMobile ? 68 : 80} />
-            <Tooltip
-              trigger={tooltipTrigger}
-              contentStyle={{ background: c.tooltipBg, border: `1px solid ${c.border}`, borderRadius: 8 }}
-              labelStyle={{ color: c.text2 }}
-              formatter={(value, name, entry: { payload?: { volatility: number } }) => {
-                if (name === 'bogeysOrWorse') {
-                  return [`${Number(value ?? 0)} bogeys+`, `Volatility ${entry.payload?.volatility ?? '—'}`];
-                }
-                return [value, name];
-              }}
-            />
-            <Bar dataKey="bogeysOrWorse" radius={[0, 8, 8, 0]}>
-              {chaosChartData.map((player) => (
-                <Cell
-                  key={player.playerName}
-                  fill={getChaosGradientColor(player.bogeysOrWorse, chaosBounds.min, chaosBounds.max)}
-                />
-              ))}
-            </Bar>
-          </BarChart>
-        </ResponsiveContainer>
-      </div>
       <div className="story-grid recap-story-grid recap-story-grid-secondary">
         <div className={`story-card recap-story-card ${funnyRecap?.closestDuel ? 'story-warn' : 'story-neutral'}`}>
           <span className="story-title">Cardiac Finish</span>

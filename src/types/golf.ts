@@ -104,6 +104,11 @@ export type AnalysisMetricKey =
   | 'eventWins'
   | 'topThreeRate'
   | 'topFiveRate'
+  | 'clutchPerformance'
+  | 'bounceBack'
+  | 'cleanCard'
+  | 'ceilingFloor'
+  | 'handicapOutperformance'
   | 'momentum'
   | 'clutchFactor';
 
