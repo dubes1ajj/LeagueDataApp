@@ -1,5 +1,6 @@
 import type { LeagueData, EventData, CourseConfig, PlayerConfig, ColorSchemeConfig } from '../types/golf';
 import { DEFAULT_EVENT_DATE_DISPLAY } from './eventDateDisplay';
+import { DEFAULT_YARDAGE_BAND_SETTINGS, normalizeYardageBandSettings } from './yardage';
 
 const DEFAULT_ADJUSTED_SCORING = {
   mode: 'none' as const,
@@ -402,6 +403,7 @@ export function loadLeagueData(): LeagueData {
       data.handicapMode = data.handicapMode ?? 'general';
       data.eventDateDisplay = { ...DEFAULT_EVENT_DATE_DISPLAY, ...(data.eventDateDisplay ?? {}) };
       data.weatherSettings = { ...DEFAULT_WEATHER_SETTINGS, ...(data.weatherSettings ?? {}) };
+      data.yardageBandSettings = normalizeYardageBandSettings(data.yardageBandSettings);
       data.analysisSettings = {
         ...DEFAULT_ANALYSIS_SETTINGS,
         ...(data.analysisSettings ?? {}),
@@ -426,6 +428,7 @@ export function loadLeagueData(): LeagueData {
     adjustedScoring: { ...DEFAULT_ADJUSTED_SCORING },
     eventDateDisplay: { ...DEFAULT_EVENT_DATE_DISPLAY },
     weatherSettings: { ...DEFAULT_WEATHER_SETTINGS },
+    yardageBandSettings: { ...DEFAULT_YARDAGE_BAND_SETTINGS },
     analysisSettings: { ...DEFAULT_ANALYSIS_SETTINGS, weights: { ...DEFAULT_ANALYSIS_SETTINGS.weights } },
     events: [],
   };

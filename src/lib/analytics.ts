@@ -32,6 +32,12 @@ function formatPlayerNames(playerNames: string[]): string {
   return `${shortNames.slice(0, -1).join(', ')} & ${shortNames[shortNames.length - 1]}`;
 }
 
+function splitAverage(values: number[], start: number, end: number): number | null {
+  const slice = values.slice(start, end);
+  if (!slice.length) return null;
+  return slice.reduce((sum, value) => sum + value, 0) / slice.length;
+}
+
 export function buildSeasonDashboard(events: EventData[], courseConfig: CourseConfig | null): DashboardCardData[] {
   const sorted = sortEvents(events);
   if (!sorted.length) return [];
@@ -59,20 +65,32 @@ export function buildSeasonDashboard(events: EventData[], courseConfig: CourseCo
     if (bestChange > 0) biggestMover = { playerNames: movers, change: bestChange };
   }
 
-  // Best recent form over last 3 events by total points
-  const last3 = sorted.slice(-3);
-  const hotMap: Record<string, number> = {};
-  for (const ev of last3) {
+  // Best momentum by the same formula used in player metrics:
+  // second-half average points minus first-half average points.
+  const pointsByPlayer: Record<string, number[]> = {};
+  for (const ev of sorted) {
     for (const p of ev.players) {
       if (p.didNotPlay) continue;
-      hotMap[p.playerName] = (hotMap[p.playerName] ?? 0) + p.points;
+      if (!pointsByPlayer[p.playerName]) pointsByPlayer[p.playerName] = [];
+      pointsByPlayer[p.playerName].push(p.points);
     }
   }
-  const hottestScore = Math.max(...Object.values(hotMap), Number.NEGATIVE_INFINITY);
+
+  const momentumByPlayer = Object.entries(pointsByPlayer)
+    .map(([playerName, points]) => {
+      const halfSplit = Math.ceil(points.length / 2);
+      const firstHalfAvg = splitAverage(points, 0, halfSplit);
+      const secondHalfAvg = splitAverage(points, Math.max(halfSplit, 1), points.length);
+      const momentum = firstHalfAvg !== null && secondHalfAvg !== null ? secondHalfAvg - firstHalfAvg : Number.NaN;
+      return { playerName, momentum };
+    })
+    .filter((entry) => Number.isFinite(entry.momentum));
+
+  const hottestScore = Math.max(...momentumByPlayer.map((entry) => entry.momentum), Number.NEGATIVE_INFINITY);
   const hottest = Number.isFinite(hottestScore)
-    ? Object.entries(hotMap)
-        .filter(([, points]) => points === hottestScore)
-        .map(([playerName]) => playerName)
+    ? momentumByPlayer
+        .filter((entry) => entry.momentum === hottestScore)
+        .map((entry) => entry.playerName)
     : [];
 
   // Hardest hole this season by avg vs par
@@ -146,8 +164,8 @@ export function buildSeasonDashboard(events: EventData[], courseConfig: CourseCo
         }
       : { title: 'Biggest Mover', value: 'No change', detail: `No one moved up in Event ${latest.eventNumber}`, tone: 'neutral' },
     hottest.length
-      ? { title: 'Most Momentum', value: formatPlayerNames(hottest), detail: `${hottestScore} pts over last 3 events`, tone: 'good' }
-      : { title: 'Most Momentum', value: '—', detail: 'Need at least one event', tone: 'neutral' },
+      ? { title: 'Most Momentum', value: formatPlayerNames(hottest), detail: `${hottestScore >= 0 ? '+' : ''}${hottestScore.toFixed(2)} pts second-half lift`, tone: 'good' }
+      : { title: 'Most Momentum', value: '—', detail: 'Need enough rounds for a first-half vs second-half split', tone: 'neutral' },
     hardest
       ? { title: 'Hardest Hole', value: `Hole ${hardest.holeNum}`, detail: `${hardest.avgVsPar >= 0 ? '+' : ''}${hardest.avgVsPar.toFixed(2)} vs par`, tone: 'warn' }
       : { title: 'Hardest Hole', value: '—', detail: 'Set course scorecard to compute', tone: 'neutral' },

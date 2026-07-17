@@ -29,6 +29,8 @@ interface HoleStat {
   holeNum: number;       // actual hole number (1-9 or 10-18)
   slot: number;          // 1-9 position on the nine
   par: number | null;
+  yardage: number | null;
+  strokeIndex: number | null;
   avgScore: number | null;
   avgVsPar: number | null;
   rounds: number;
@@ -49,6 +51,7 @@ function computeHoleStats(
 ): HoleStat[] {
   const pars = courseConfig ? getParsForNine(courseConfig, nine) : null;
   const startHole = nine === 'back' ? 10 : 1;
+  const scorecardHoles = courseConfig?.holes.slice(startHole - 1, startHole + 8) ?? [];
 
   // Only include events that played this nine
   const relevant = events.filter(ev => ev.nineHoles === nine);
@@ -56,6 +59,7 @@ function computeHoleStats(
   return Array.from({ length: 9 }, (_, slotIdx): HoleStat => {
     const holeNum = startHole + slotIdx;
     const par = pars ? pars[slotIdx] : null;
+    const scorecardHole = scorecardHoles[slotIdx] ?? null;
 
     const scores: number[] = [];
     let eagles = 0, birdies = 0, pars_ = 0, bogeys = 0, doubles = 0, triples = 0;
@@ -83,6 +87,8 @@ function computeHoleStats(
       holeNum,
       slot: slotIdx + 1,
       par,
+      yardage: scorecardHole?.yardage ?? null,
+      strokeIndex: scorecardHole?.strokeIndex ?? null,
       avgScore: avg !== null ? Math.round(avg * 100) / 100 : null,
       avgVsPar: avg !== null && par !== null ? Math.round((avg - par) * 100) / 100 : null,
       rounds: scores.length,
@@ -107,6 +113,12 @@ function avgVsParColor(v: number | null): string {
   return '#ef4444';
 }
 
+interface CourseSummaryMetric {
+  label: string;
+  value: string;
+  detail: string;
+}
+
 export default memo(function HoleStatsChart({ events, courseConfig, onSetupCourse, onHoleClick }: HoleStatsProps) {
   const c = useChartColors();
 
@@ -128,10 +140,52 @@ export default memo(function HoleStatsChart({ events, courseConfig, onSetupCours
   function renderNine(stats: HoleStat[], label: string, evCount: number, nine: 'front' | 'back') {
     const hasData = stats.some(s => s.rounds > 0);
     const hasPar  = stats.some(s => s.par !== null);
+    const hasYardage = stats.some((s) => s.yardage !== null);
+    const hasStrokeIndex = stats.some((s) => s.strokeIndex !== null);
     const avgParLine = hasPar
       ? stats.filter(s => s.avgVsPar !== null).reduce((s, h) => s + (h.avgVsPar ?? 0), 0) /
         Math.max(1, stats.filter(s => s.avgVsPar !== null).length)
       : null;
+
+    const layoutMetrics: CourseSummaryMetric[] = [];
+    if (hasYardage) {
+      const yardageStats = stats.filter((hole) => hole.yardage !== null);
+      if (yardageStats.length) {
+        const longest = yardageStats.reduce((best, hole) => (hole.yardage! > best.yardage! ? hole : best));
+        const shortest = yardageStats.reduce((best, hole) => (hole.yardage! < best.yardage! ? hole : best));
+        layoutMetrics.push(
+          {
+            label: 'Longest Hole',
+            value: `#${longest.holeNum} · ${longest.yardage} yds`,
+            detail: 'Longest on this nine',
+          },
+          {
+            label: 'Shortest Hole',
+            value: `#${shortest.holeNum} · ${shortest.yardage} yds`,
+            detail: 'Shortest on this nine',
+          },
+        );
+      }
+    }
+    if (hasStrokeIndex) {
+      const handicapStats = stats.filter((hole) => hole.strokeIndex !== null);
+      if (handicapStats.length) {
+        const hardest = handicapStats.reduce((best, hole) => (hole.strokeIndex! < best.strokeIndex! ? hole : best));
+        const easiest = handicapStats.reduce((best, hole) => (hole.strokeIndex! > best.strokeIndex! ? hole : best));
+        layoutMetrics.push(
+          {
+            label: 'Hardest H\'cap',
+            value: `#${hardest.holeNum} · ${hardest.strokeIndex}`,
+            detail: 'Full 18-hole handicap',
+          },
+          {
+            label: 'Easiest H\'cap',
+            value: `#${easiest.holeNum} · ${easiest.strokeIndex}`,
+            detail: 'Full 18-hole handicap',
+          },
+        );
+      }
+    }
 
     // Bar chart data: average vs par per hole so mixed pars stay comparable.
     const avgChartData = stats.map(s => ({
@@ -158,6 +212,17 @@ export default memo(function HoleStatsChart({ events, courseConfig, onSetupCours
           {label}
           <span className="chart-badge">{evCount} event{evCount !== 1 ? 's' : ''}</span>
         </h3>
+        {(hasYardage || hasStrokeIndex) && layoutMetrics.length > 0 && (
+          <div className="recap-stat-grid" style={{ margin: '12px 0 16px' }}>
+            {layoutMetrics.map((metric) => (
+              <div key={`${label}-${metric.label}`} className="recap-stat-card">
+                <span className="recap-stat-label">{metric.label}</span>
+                <span className="recap-stat-value">{metric.value}</span>
+                <span className="recap-stat-detail">{metric.detail}</span>
+              </div>
+            ))}
+          </div>
+        )}
         {!hasData && (
           <p className="empty-text" style={{ padding: '8px 0' }}>No rounds played on this nine yet.</p>
         )}
@@ -204,6 +269,11 @@ export default memo(function HoleStatsChart({ events, courseConfig, onSetupCours
                 </span>
               )}
             </p>
+            {(hasYardage || hasStrokeIndex) && (
+              <p className="chart-subtitle" style={{ marginTop: 8 }}>
+                {hasYardage ? 'Yardage' : ''}{hasYardage && hasStrokeIndex ? ' and ' : ''}{hasStrokeIndex ? "handicap" : ''} values come from the league scorecard. Handicap uses the full 18-hole scorecard, even when only one side is played.
+              </p>
+            )}
             <ResponsiveContainer width="100%" height={200}>
               <BarChart data={distChartData} margin={{ top: 4, right: 10, left: -10, bottom: 4 }}>
                 <CartesianGrid strokeDasharray="3 3" stroke={c.grid} />
@@ -229,6 +299,8 @@ export default memo(function HoleStatsChart({ events, courseConfig, onSetupCours
                   <tr>
                     <th>Hole</th>
                     {hasPar && <th>Par</th>}
+                    {hasYardage && <th>Yards</th>}
+                    {hasStrokeIndex && <th title="Based on the full 18-hole scorecard">H'cap</th>}
                     <th>Rounds</th>
                     <th>Avg</th>
                     {hasPar && <th title="Average vs par">vs Par</th>}
@@ -255,6 +327,8 @@ export default memo(function HoleStatsChart({ events, courseConfig, onSetupCours
                         </button>
                       </td>
                       {hasPar && <td className="hs-td-center">{s.par ?? '—'}</td>}
+                      {hasYardage && <td className="hs-td-center">{s.yardage ?? '—'}</td>}
+                      {hasStrokeIndex && <td className="hs-td-center" title="Based on the full 18-hole scorecard">{s.strokeIndex ?? '—'}</td>}
                       <td className="hs-td-center">{s.rounds}</td>
                       <td className="hs-td-center" style={{ fontWeight: 600 }}>
                         {s.avgScore !== null ? s.avgScore.toFixed(2) : '—'}

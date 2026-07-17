@@ -5,6 +5,7 @@ import {
 } from 'recharts';
 import type { AnalysisMetricKey, CourseConfig, EventData, HandicapMode, LeagueAnalysisSettings } from '../types/golf';
 import { buildComparePlayerRows } from '../lib/analytics';
+import { buildLeagueAnalysisRanking } from '../lib/analysisRanking';
 import { getPlayerColor } from '../lib/colors';
 import { useChartColors } from '../lib/useChartColors';
 import { buildDisplayNames } from '../lib/displayNames';
@@ -18,11 +19,6 @@ interface ComparePlayersPanelProps {
   handicapMode: HandicapMode;
   analysisSettings: LeagueAnalysisSettings;
   onPlayerClick?: (playerName: string) => void;
-}
-
-function scoreToStars(score: number): number {
-  const normalized = Math.max(0, Math.min(100, score));
-  return Math.round((normalized / 20) * 2) / 2;
 }
 
 function renderStarRating(stars: number) {
@@ -58,6 +54,7 @@ export default memo(function ComparePlayersPanel({ events, courseConfig, handica
   const [showMetricDefinitions, setShowMetricDefinitions] = useState(false);
   const [historyMetricId, setHistoryMetricId] = useState<AnalysisMetricKey>('eventWins');
   const [metricContextTarget, setMetricContextTarget] = useState<{ metricId: AnalysisMetricKey; mode: 'player' | 'leaderTimeline'; playerName?: string } | null>(null);
+  const [metricContextView, setMetricContextView] = useState<'table' | 'graph'>('table');
   const sortedEvents = useMemo(() => [...events].sort((a, b) => a.eventNumber - b.eventNumber), [events]);
 
   const metricDefinitionsContent = useMemo(() => ([
@@ -605,36 +602,17 @@ export default memo(function ComparePlayersPanel({ events, courseConfig, handica
     };
   }
 
-  const analysisRanking = useMemo(() => {
-    const metricWeightSum = radarModel.metricDefinitions.reduce((sum, metric) => sum + metric.weight, 0);
-    return fieldSummaryRows
-      .map((row) => {
-        const metricScores = Object.fromEntries(
-          radarModel.metricDefinitions.map((metric) => [metric.id, radarModel.scoresByMetricId[metric.id]?.[row.name] ?? 0])
-        );
-        const weightedSum = radarModel.metricDefinitions.reduce(
-          (sum, metric) => sum + ((metricScores[metric.id] as number) * metric.weight),
-          0
-        );
-        const overallScore = weightedSum / (metricWeightSum || 1);
-        const stars = scoreToStars(overallScore);
+  const sharedAnalysis = useMemo(
+    () => buildLeagueAnalysisRanking(sortedEvents, courseConfig, analysisSettings),
+    [analysisSettings, courseConfig, sortedEvents],
+  );
 
-        return {
-          name: row.name,
-          display: row.display,
-          overallScore,
-          stars,
-          metricScores,
-          metricRawCounts: {
-            eventWins: row.eventWinsCount ?? 0,
-            topThreeRate: row.topThreeCount ?? 0,
-            topFiveRate: row.topFiveCount ?? 0,
-            cleanCard: row.cleanCardCount ?? 0,
-          },
-        };
-      })
-      .sort((a, b) => b.overallScore - a.overallScore || a.display.localeCompare(b.display));
-  }, [fieldSummaryRows, radarModel.metricDefinitions, radarModel.scoresByMetricId]);
+  const analysisRanking = useMemo(() => {
+    return sharedAnalysis.ranking.map((entry) => ({
+      ...entry,
+      display: displayNames[entry.name] ?? entry.name,
+    }));
+  }, [displayNames, sharedAnalysis.ranking]);
 
   const fieldSummaryByName = useMemo(
     () => Object.fromEntries(fieldSummaryRows.map((row) => [row.name, row])),
@@ -682,8 +660,13 @@ export default memo(function ComparePlayersPanel({ events, courseConfig, handica
     return value.toFixed(2);
   }, []);
 
+  const shouldCarryForwardOnDnp = useCallback((metricId: AnalysisMetricKey) => metricId !== 'participation', []);
+
   const metricHistoryData = useMemo(() => {
     if (!selected.length) return [] as Array<Record<string, string | number | null>>;
+
+    const previousRawByPlayer: Record<string, number | null> = Object.fromEntries(selected.map((name) => [name, null]));
+
     return sortedEvents.map((event, index) => {
       const prefixEvents = sortedEvents.slice(0, index + 1);
       const prefixRows = buildComparePlayerRows(prefixEvents, selected);
@@ -694,11 +677,22 @@ export default memo(function ComparePlayersPanel({ events, courseConfig, handica
         eventNumber: event.eventNumber,
       };
       selected.forEach((name) => {
-        point[name] = getMetricHistoryValue(prefixByName[name], historyMetricId, prefixEvents.length);
+        const playerInEvent = event.players.find((entry) => entry.playerName === name);
+        const playedThisEvent = Boolean(playerInEvent && !playerInEvent.didNotPlay);
+        const computedRawValue = getMetricHistoryValue(prefixByName[name], historyMetricId, prefixEvents.length);
+        const rawValue = !playedThisEvent && shouldCarryForwardOnDnp(historyMetricId)
+          ? previousRawByPlayer[name]
+          : computedRawValue;
+
+        point[name] = rawValue;
+
+        if (rawValue !== null && Number.isFinite(rawValue)) {
+          previousRawByPlayer[name] = rawValue;
+        }
       });
       return point;
     });
-  }, [selected, sortedEvents, summarizePlayers, historyMetricId, getMetricHistoryValue]);
+  }, [selected, sortedEvents, summarizePlayers, historyMetricId, getMetricHistoryValue, shouldCarryForwardOnDnp]);
 
   const metricLeaders = useMemo(() => {
     return radarModel.metricDefinitions.map((metric) => {
@@ -731,7 +725,7 @@ export default memo(function ComparePlayersPanel({ events, courseConfig, handica
     }));
   }, [analysisRanking, radarModel.metricDefinitions]);
 
-  const metricContextRows = useMemo<Array<{ eventLabel: string; eventDate: string; summary: string; counted?: boolean }>>(() => {
+  const metricContextRows = useMemo<Array<{ eventLabel: string; eventDate: string; summary: string }>>(() => {
     if (!metricContextTarget) return [] as Array<{ eventLabel: string; eventDate: string; summary: string; counted?: boolean }>;
     if (metricContextTarget.mode === 'leaderTimeline') {
       return sortedEvents.map((event, index) => {
@@ -755,97 +749,85 @@ export default memo(function ComparePlayersPanel({ events, courseConfig, handica
         };
       });
     }
-    const playerName = metricContextTarget.playerName;
-    if (!playerName) return [];
-    const playerSummary = fieldSummaryByName[playerName];
-    return sortedEvents.flatMap((event) => {
-      const player = event.players.find((entry) => entry.playerName === playerName && !entry.didNotPlay);
-      if (!player) return [];
-      const eventLabel = event.eventName?.trim() || `Event ${event.eventNumber}`;
-      const eventDate = event.eventDate || '';
-      const activePlayers = event.players.filter((entry) => !entry.didNotPlay);
-      const maxPoints = activePlayers.reduce((max, entry) => Math.max(max, entry.points), Number.NEGATIVE_INFINITY);
-      const pointsRank = activePlayers.filter((entry) => entry.points > player.points).length + 1;
+    return [];
+  }, [metricContextTarget, sortedEvents, buildMetricModel, players, summarizePlayers]);
 
-      switch (metricContextTarget.metricId) {
-        case 'eventWins':
-          return [{ eventLabel, eventDate, summary: `${player.points} pts`, counted: player.points === maxPoints }];
-        case 'topThreeRate':
-          return [{ eventLabel, eventDate, summary: `${player.points} pts · rank ${pointsRank}`, counted: pointsRank <= 3 }];
-        case 'topFiveRate':
-          return [{ eventLabel, eventDate, summary: `${player.points} pts · rank ${pointsRank}`, counted: pointsRank <= 5 }];
-        case 'cleanCard': {
-          const clean = player.doubleBogeys + player.tripleBogeys + player.other === 0;
-          return [{ eventLabel, eventDate, summary: clean ? 'No double bogey or worse' : `${player.doubleBogeys + player.tripleBogeys + player.other} double+ holes`, counted: clean }];
-        }
-        case 'damageControl': {
-          const weightedPenalty = (player.bogeys * 1) + (player.doubleBogeys * 2) + (player.tripleBogeys * 3) + (player.other * 4);
-          return [{ eventLabel, eventDate, summary: `${weightedPenalty} weighted penalty points` }];
-        }
-        case 'blowupAvoidance': {
-          const blowupHoles = player.doubleBogeys + player.tripleBogeys + player.other;
-          return [{ eventLabel, eventDate, summary: `${blowupHoles} blow-up hole${blowupHoles === 1 ? '' : 's'}` }];
-        }
-        case 'clutchPerformance': {
-          if (!courseConfig) return [{ eventLabel, eventDate, summary: 'No course scorecard data' }];
-          const parsForNine = getParsForNine(courseConfig, event.nineHoles);
-          const closingDiffs = player.holes.slice(-3).map((score, index) => score === null ? null : score - parsForNine[parsForNine.length - 3 + index]).filter((value): value is number => value !== null);
-          if (!closingDiffs.length) return [{ eventLabel, eventDate, summary: 'No closing-hole data' }];
-          const closingAvg = closingDiffs.reduce((sum, value) => sum + value, 0) / closingDiffs.length;
-          return [{ eventLabel, eventDate, summary: `${closingAvg >= 0 ? '+' : ''}${closingAvg.toFixed(2)} avg vs par on final 3` }];
-        }
-        case 'bounceBack': {
-          if (!courseConfig) return [{ eventLabel, eventDate, summary: 'No course scorecard data' }];
-          const parsForNine = getParsForNine(courseConfig, event.nineHoles);
-          const diffs = player.holes.map((score, index) => score === null ? null : score - parsForNine[index]);
-          let successes = 0;
-          let chances = 0;
-          for (let index = 0; index < diffs.length - 1; index += 1) {
-            const currentDiff = diffs[index];
-            const nextDiff = diffs[index + 1];
-            if (currentDiff === null || nextDiff === null || currentDiff < 1) continue;
-            chances += 1;
-            if (nextDiff <= 0) successes += 1;
-          }
-          return [{ eventLabel, eventDate, summary: chances ? `${successes}/${chances} bounce-backs` : 'No bounce-back chances' }];
-        }
-        case 'ceilingFloor': {
-          const roundScore = player.netScore ?? player.grossScore;
-          if (roundScore === null || !playerSummary) return [{ eventLabel, eventDate, summary: 'No score data' }];
-          const tags = [
-            playerSummary.bestRoundScore === roundScore ? 'ceiling' : null,
-            playerSummary.worstRoundScore === roundScore ? 'floor' : null,
-          ].filter(Boolean).join(' · ');
-          return [{ eventLabel, eventDate, summary: `${roundScore.toFixed(1)}${tags ? ` · ${tags}` : ''}` }];
-        }
-        case 'handicapOutperformance': {
-          if (!courseConfig || player.netScore === null) return [{ eventLabel, eventDate, summary: 'No net-par data' }];
-          const totalPar = getParsForNine(courseConfig, event.nineHoles).reduce((sum, par) => sum + par, 0);
-          const outperformance = totalPar - player.netScore;
-          return [{ eventLabel, eventDate, summary: `${outperformance >= 0 ? '+' : ''}${outperformance.toFixed(1)} vs net par` }];
-        }
-        case 'pointsForm':
-          return [{ eventLabel, eventDate, summary: `${player.points} pts` }];
-        case 'netScoring':
-          return [{ eventLabel, eventDate, summary: player.netScore === null ? 'No net score' : `${player.netScore.toFixed(1)} net` }];
-        case 'grossScoring':
-          return [{ eventLabel, eventDate, summary: player.grossScore === null ? 'No gross score' : `${player.grossScore.toFixed(1)} gross` }];
-        case 'participation':
-          return [{ eventLabel, eventDate, summary: 'Played' }];
-        case 'parEfficiency':
-          return [{ eventLabel, eventDate, summary: `${player.pars} pars` }];
-        case 'birdieRate':
-          return [{ eventLabel, eventDate, summary: `${player.birdies} birdies` }];
-        case 'consistency':
-          return [{ eventLabel, eventDate, summary: `${player.netScore ?? player.grossScore ?? '—'} score posted` }];
-        case 'momentum':
-        case 'clutchFactor':
-          return [{ eventLabel, eventDate, summary: `${player.points} pts` }];
-        default:
-          return [{ eventLabel, eventDate, summary: `${player.points} pts` }];
-      }
-    });
-  }, [metricContextTarget, sortedEvents, fieldSummaryByName, courseConfig, buildMetricModel, players, summarizePlayers]);
+  const playerMetricHistoryRows = useMemo<Array<{
+    eventKey: string;
+    eventLabel: string;
+    eventDate: string;
+    rawValue: number | null;
+    rawLabel: string;
+    normalizedScore: number | null;
+    normalizedLabel: string;
+    rawDelta: number | null;
+    normalizedDelta: number | null;
+  }>>(() => {
+    if (!metricContextTarget || metricContextTarget.mode !== 'player' || !metricContextTarget.playerName) return [];
+
+    const rows: Array<{
+      eventKey: string;
+      eventLabel: string;
+      eventDate: string;
+      rawValue: number | null;
+      rawLabel: string;
+      normalizedScore: number | null;
+      normalizedLabel: string;
+      rawDelta: number | null;
+      normalizedDelta: number | null;
+    }> = [];
+
+    let previousRaw: number | null = null;
+    let previousNormalized: number | null = null;
+
+    for (let index = 0; index < sortedEvents.length; index += 1) {
+      const event = sortedEvents[index];
+      const prefixEvents = sortedEvents.slice(0, index + 1);
+      const prefixRows = buildComparePlayerRows(prefixEvents, players);
+      const prefixSummaries = summarizePlayers(prefixEvents, players, prefixRows);
+      const prefixByName = Object.fromEntries(prefixSummaries.map((row) => [row.name, row]));
+      const playerSummary = prefixByName[metricContextTarget.playerName];
+      const playerInEvent = event.players.find((entry) => entry.playerName === metricContextTarget.playerName);
+      const playedThisEvent = Boolean(playerInEvent && !playerInEvent.didNotPlay);
+      const computedRawValue: number | null = getMetricHistoryValue(playerSummary, metricContextTarget.metricId, prefixEvents.length);
+      const rawValue: number | null = !playedThisEvent && shouldCarryForwardOnDnp(metricContextTarget.metricId)
+        ? previousRaw
+        : computedRawValue;
+
+      const prefixModel = buildMetricModel(prefixSummaries, prefixSummaries, prefixEvents.length);
+      const normalizedScore = playerSummary
+        ? Number(prefixModel.scoresByMetricId[metricContextTarget.metricId]?.[metricContextTarget.playerName] ?? 0)
+        : null;
+
+      const rawDelta = rawValue === null || previousRaw === null ? null : rawValue - previousRaw;
+      const normalizedDelta = normalizedScore === null || previousNormalized === null ? null : normalizedScore - previousNormalized;
+
+      rows.push({
+        eventKey: `E${event.eventNumber}`,
+        eventLabel: event.eventName?.trim() || `Event ${event.eventNumber}`,
+        eventDate: event.eventDate || '',
+        rawValue,
+        rawLabel: formatMetricHistoryValue(metricContextTarget.metricId, rawValue),
+        normalizedScore,
+        normalizedLabel: normalizedScore === null ? '—' : `${Math.round(normalizedScore)}`,
+        rawDelta,
+        normalizedDelta,
+      });
+
+      if (rawValue !== null && Number.isFinite(rawValue)) previousRaw = rawValue;
+      if (normalizedScore !== null && Number.isFinite(normalizedScore)) previousNormalized = normalizedScore;
+    }
+
+    return rows;
+  }, [metricContextTarget, sortedEvents, players, summarizePlayers, getMetricHistoryValue, buildMetricModel, formatMetricHistoryValue, shouldCarryForwardOnDnp]);
+
+  const playerMetricHistoryGraphData = useMemo(() => {
+    return playerMetricHistoryRows.map((row) => ({
+      event: row.eventKey,
+      rawValue: row.rawValue,
+      normalizedScore: row.normalizedScore,
+    }));
+  }, [playerMetricHistoryRows]);
 
   return (
     <div className="chart-container">
@@ -1120,6 +1102,36 @@ export default memo(function ComparePlayersPanel({ events, courseConfig, handica
         </>
       )}
 
+      {selected.length > 0 && (
+        <>
+          <div className="pp-section-title">Metric History</div>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 10, flexWrap: 'wrap', marginTop: 10, marginBottom: 10 }}>
+            <label style={{ color: 'var(--text2)', fontSize: 12 }}>Metric</label>
+            <select className="url-input" value={historyMetricId} onChange={(e) => setHistoryMetricId(e.target.value as AnalysisMetricKey)} style={{ maxWidth: 260 }}>
+              {radarModel.metricDefinitions.map((metric) => (
+                <option key={`history-${metric.id}`} value={metric.id}>{metric.label}</option>
+              ))}
+            </select>
+          </div>
+          <ResponsiveContainer width="100%" height={240}>
+            <LineChart data={metricHistoryData} margin={{ top: 8, right: 10, left: isMobile ? -16 : -10, bottom: 4 }}>
+              <CartesianGrid strokeDasharray="3 3" stroke={c.grid} />
+              <XAxis dataKey="event" stroke={c.axis} tick={{ fill: c.tick, fontSize: 11 }} />
+              <YAxis stroke={c.axis} tick={{ fill: c.tick, fontSize: 11 }} />
+              <Tooltip
+                trigger={tooltipTrigger}
+                contentStyle={{ background: c.tooltipBg, border: `1px solid ${c.border}`, borderRadius: 8 }}
+                labelStyle={{ color: c.text2 }}
+                formatter={(value, name) => [formatMetricHistoryValue(historyMetricId, Number.isFinite(Number(value)) ? Number(value) : null), displayNames[String(name)] ?? String(name)]}
+              />
+              {selected.map((name) => (
+                <Line key={`history-line-${name}`} type="linear" dataKey={name} name={displayNames[name] ?? name} stroke={getPlayerColor(name)} strokeWidth={2.5} dot={{ r: 3, fill: getPlayerColor(name) }} connectNulls />
+              ))}
+            </LineChart>
+          </ResponsiveContainer>
+        </>
+      )}
+
       <div className="pp-section-title" style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 10 }}>
         <span>Overall Analysis Ranking (League-Wide)</span>
         <button className="btn-secondary" onClick={() => setShowMetricDefinitions(true)} style={{ padding: '5px 10px', fontSize: 12 }}>
@@ -1142,7 +1154,10 @@ export default memo(function ComparePlayersPanel({ events, courseConfig, handica
               type="button"
               className="compare-profile-card"
               style={{ textAlign: 'left' }}
-              onClick={() => setMetricContextTarget({ metricId: metric.id, mode: 'leaderTimeline' })}
+              onClick={() => {
+                setMetricContextView('table');
+                setMetricContextTarget({ metricId: metric.id, mode: 'leaderTimeline' });
+              }}
             >
               <div className="compare-profile-name" style={{ marginBottom: 8 }}>{metric.label}</div>
               <div style={{ color: 'var(--text)', fontWeight: 700, marginBottom: 4 }}>
@@ -1152,36 +1167,6 @@ export default memo(function ComparePlayersPanel({ events, courseConfig, handica
             </button>
           ))}
         </div>
-
-        {selected.length > 0 && (
-          <>
-            <div className="pp-section-title">Metric History</div>
-            <div style={{ display: 'flex', alignItems: 'center', gap: 10, flexWrap: 'wrap', marginTop: 10, marginBottom: 10 }}>
-              <label style={{ color: 'var(--text2)', fontSize: 12 }}>Metric</label>
-              <select className="url-input" value={historyMetricId} onChange={(e) => setHistoryMetricId(e.target.value as AnalysisMetricKey)} style={{ maxWidth: 260 }}>
-                {radarModel.metricDefinitions.map((metric) => (
-                  <option key={`history-${metric.id}`} value={metric.id}>{metric.label}</option>
-                ))}
-              </select>
-            </div>
-            <ResponsiveContainer width="100%" height={240}>
-              <LineChart data={metricHistoryData} margin={{ top: 8, right: 10, left: isMobile ? -16 : -10, bottom: 4 }}>
-                <CartesianGrid strokeDasharray="3 3" stroke={c.grid} />
-                <XAxis dataKey="event" stroke={c.axis} tick={{ fill: c.tick, fontSize: 11 }} />
-                <YAxis stroke={c.axis} tick={{ fill: c.tick, fontSize: 11 }} />
-                <Tooltip
-                  trigger={tooltipTrigger}
-                  contentStyle={{ background: c.tooltipBg, border: `1px solid ${c.border}`, borderRadius: 8 }}
-                  labelStyle={{ color: c.text2 }}
-                  formatter={(value, name) => [formatMetricHistoryValue(historyMetricId, Number.isFinite(Number(value)) ? Number(value) : null), displayNames[String(name)] ?? String(name)]}
-                />
-                {selected.map((name) => (
-                  <Line key={`history-line-${name}`} type="linear" dataKey={name} name={displayNames[name] ?? name} stroke={getPlayerColor(name)} strokeWidth={2.5} dot={{ r: 3, fill: getPlayerColor(name) }} connectNulls />
-                ))}
-              </LineChart>
-            </ResponsiveContainer>
-          </>
-        )}
 
         <div className="compare-analysis-mobile-list" style={{ marginTop: 14 }}>
           {analysisRanking.map((entry, index) => {
@@ -1253,7 +1238,10 @@ export default memo(function ComparePlayersPanel({ events, courseConfig, handica
                         type="button"
                         className="compare-analysis-metric-chip"
                         style={{ textAlign: 'left', cursor: 'pointer' }}
-                        onClick={() => setMetricContextTarget({ playerName: entry.name, metricId: metric.id, mode: 'player' })}
+                        onClick={() => {
+                          setMetricContextView('table');
+                          setMetricContextTarget({ playerName: entry.name, metricId: metric.id, mode: 'player' });
+                        }}
                       >
                         {metric.label}: {chipValue}<span className={chipDelta.className}>{chipDelta.label}</span>
                       </button>
@@ -1279,30 +1267,121 @@ export default memo(function ComparePlayersPanel({ events, courseConfig, handica
               <p className="hint" style={{ marginBottom: 0 }}>
                 {metricContextTarget.mode === 'leaderTimeline'
                   ? 'Event-by-event leader timeline showing who led this metric after each event.'
-                  : 'Event-by-event context showing which rounds drove this metric.'}
+                  : 'Event-by-event progression for this metric, including raw value and normalized model score.'}
               </p>
-              <div className="compare-summary-table-wrap" style={{ marginTop: 0 }}>
-                <table className="compare-summary-table">
-                  <thead>
-                    <tr>
-                      <th>Event</th>
-                      <th>Date</th>
-                      <th>Context</th>
-                      <th>Counts?</th>
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {metricContextRows.map((row, index) => (
-                      <tr key={`metric-context-${row.eventLabel}-${index}`} className={index % 2 === 0 ? 'compare-even' : ''}>
-                        <td>{row.eventLabel}</td>
-                        <td>{row.eventDate || '—'}</td>
-                        <td>{row.summary}</td>
-                        <td>{typeof row.counted === 'boolean' ? (row.counted ? 'Yes' : 'No') : '—'}</td>
+              {metricContextTarget.mode === 'player' && (
+                <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
+                  <button
+                    type="button"
+                    className={`btn-secondary ${metricContextView === 'table' ? 'rank-basis-btn-active' : ''}`}
+                    onClick={() => setMetricContextView('table')}
+                    style={{ padding: '5px 10px', fontSize: 12 }}
+                  >
+                    Table View
+                  </button>
+                  <button
+                    type="button"
+                    className={`btn-secondary ${metricContextView === 'graph' ? 'rank-basis-btn-active' : ''}`}
+                    onClick={() => setMetricContextView('graph')}
+                    style={{ padding: '5px 10px', fontSize: 12 }}
+                  >
+                    Graph View
+                  </button>
+                </div>
+              )}
+              {metricContextTarget.mode === 'leaderTimeline' ? (
+                <div className="compare-summary-table-wrap" style={{ marginTop: 0 }}>
+                  <table className="compare-summary-table">
+                    <thead>
+                      <tr>
+                        <th>Event</th>
+                        <th>Date</th>
+                        <th>Leader Context</th>
                       </tr>
-                    ))}
-                  </tbody>
-                </table>
-              </div>
+                    </thead>
+                    <tbody>
+                      {metricContextRows.map((row, index) => (
+                        <tr key={`metric-context-${row.eventLabel}-${index}`} className={index % 2 === 0 ? 'compare-even' : ''}>
+                          <td>{row.eventLabel}</td>
+                          <td>{row.eventDate || '—'}</td>
+                          <td>{row.summary}</td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+              ) : metricContextView === 'table' ? (
+                <div className="compare-summary-table-wrap" style={{ marginTop: 0 }}>
+                  <table className="compare-summary-table">
+                    <thead>
+                      <tr>
+                        <th>Event</th>
+                        <th>Date</th>
+                        <th>Raw Metric Value</th>
+                        <th>Raw Delta</th>
+                        <th>Model Score (0-100)</th>
+                        <th>Score Trend</th>
+                        <th>Score Delta</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {playerMetricHistoryRows.map((row, index) => (
+                        <tr key={`metric-history-${row.eventLabel}-${index}`} className={index % 2 === 0 ? 'compare-even' : ''}>
+                          <td>{row.eventLabel}</td>
+                          <td>{row.eventDate || '—'}</td>
+                          <td>{row.rawLabel}</td>
+                          <td>{row.rawDelta === null ? '—' : `${row.rawDelta >= 0 ? '+' : ''}${row.rawDelta.toFixed(2)}`}</td>
+                          <td>{row.normalizedLabel}</td>
+                          <td>
+                            {row.normalizedScore === null ? '—' : (
+                              <div style={{ width: 140, height: 10, background: 'var(--bg4)', borderRadius: 999, overflow: 'hidden' }}>
+                                <div
+                                  style={{
+                                    height: '100%',
+                                    width: `${Math.max(0, Math.min(100, row.normalizedScore))}%`,
+                                    background: 'var(--accent)',
+                                  }}
+                                />
+                              </div>
+                            )}
+                          </td>
+                          <td>{row.normalizedDelta === null ? '—' : `${row.normalizedDelta >= 0 ? '+' : ''}${row.normalizedDelta.toFixed(1)}`}</td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+              ) : (
+                <>
+                  <ResponsiveContainer width="100%" height={260}>
+                    <LineChart data={playerMetricHistoryGraphData} margin={{ top: 8, right: 24, left: 8, bottom: 4 }}>
+                      <CartesianGrid strokeDasharray="3 3" stroke={c.grid} />
+                      <XAxis dataKey="event" stroke={c.axis} tick={{ fill: c.tick, fontSize: 11 }} />
+                      <YAxis
+                        yAxisId="raw"
+                        stroke={c.axis}
+                        tick={{ fill: c.tick, fontSize: 11 }}
+                        tickFormatter={(value) => formatMetricHistoryValue(metricContextTarget.metricId, Number(value))}
+                      />
+                      <YAxis yAxisId="norm" orientation="right" domain={[0, 100]} stroke={c.axis} tick={{ fill: c.tick, fontSize: 11 }} />
+                      <Tooltip
+                        trigger={tooltipTrigger}
+                        contentStyle={{ background: c.tooltipBg, border: `1px solid ${c.border}`, borderRadius: 8 }}
+                        labelStyle={{ color: c.text2 }}
+                        formatter={(value, name) => {
+                          if (name === 'rawValue') return [formatMetricHistoryValue(metricContextTarget.metricId, Number.isFinite(Number(value)) ? Number(value) : null), 'Raw value'];
+                          return [Number.isFinite(Number(value)) ? `${Math.round(Number(value))}` : '—', 'Model score (0-100)'];
+                        }}
+                      />
+                      <Line yAxisId="raw" type="monotone" dataKey="rawValue" stroke="var(--accent)" strokeWidth={2.5} dot={{ r: 3, fill: 'var(--accent)' }} connectNulls name="rawValue" />
+                      <Line yAxisId="norm" type="monotone" dataKey="normalizedScore" stroke="#f59e0b" strokeWidth={2.5} dot={{ r: 3, fill: '#f59e0b' }} connectNulls name="normalizedScore" />
+                    </LineChart>
+                  </ResponsiveContainer>
+                  <div style={{ color: 'var(--text2)', fontSize: 12, lineHeight: 1.5 }}>
+                    Blue line = raw metric value, amber line = normalized model score (0-100).
+                  </div>
+                </>
+              )}
             </div>
           </div>
         </div>

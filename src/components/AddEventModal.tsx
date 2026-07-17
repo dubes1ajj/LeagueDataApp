@@ -85,7 +85,7 @@ export default function AddEventModal({ onClose, onAdd, courseConfig, activePlay
       setError('Could not parse the HTML. Make sure you pasted the full page source from golfsoftware.com.');
       return;
     }
-    onAdd(withManualWeather(parsed));
+    onAdd(withManualWeather({ ...parsed, sourceType: 'paste' }));
   }
 
   function handleHtmlChange(value: string) {
@@ -123,7 +123,12 @@ export default function AddEventModal({ onClose, onAdd, courseConfig, activePlay
         setLoading(false);
         return;
       }
-      onAdd(withManualWeather(parsed));
+      onAdd(withManualWeather({
+        ...parsed,
+        sourceType: 'url',
+        sourceUrl: parsedUrl.toString(),
+        sourceFetchedAt: new Date().toISOString(),
+      }));
     } catch (e) {
       setError(`Failed to fetch: ${(e as Error).message}. Try the "Paste HTML" tab if the error persists.`);
       setLoading(false);
@@ -257,6 +262,7 @@ export default function AddEventModal({ onClose, onAdd, courseConfig, activePlay
     onAdd(withManualWeather({
       eventNumber,
       eventDate: formatEventDate(manualEventDate),
+      sourceType: 'manual',
       nineHoles: manualNine,
       standings,
       players: players.map((player) => ({

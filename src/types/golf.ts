@@ -44,6 +44,9 @@ export interface EventData {
   eventNumber: number;
   eventName?: string;
   eventDate: string; // e.g. "4/22/2025"
+  sourceType?: 'url' | 'paste' | 'manual' | 'excel';
+  sourceUrl?: string;
+  sourceFetchedAt?: string;
   eventWeather?: EventWeather;
   nineHoles: 'front' | 'back'; // which 9 holes were played this event
   players: PlayerEventData[];
@@ -91,6 +94,18 @@ export interface LeagueWeatherSettings {
   playTime: string; // 24h HH:mm
 }
 
+export interface YardageBandThresholds {
+  shortMax: number;
+  midMax: number;
+  longMax: number;
+}
+
+export interface LeagueYardageBandSettings {
+  par3: YardageBandThresholds;
+  par4: YardageBandThresholds;
+  par5: YardageBandThresholds;
+}
+
 export type AnalysisMetricKey =
   | 'pointsForm'
   | 'netScoring'
@@ -123,6 +138,7 @@ export interface LeagueData {
   adjustedScoring: AdjustedScoringSettings;
   eventDateDisplay: EventDateDisplaySettings;
   weatherSettings: LeagueWeatherSettings;
+  yardageBandSettings: LeagueYardageBandSettings;
   analysisSettings: LeagueAnalysisSettings;
   events: EventData[];
 }

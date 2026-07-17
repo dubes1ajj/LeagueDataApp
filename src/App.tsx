@@ -34,6 +34,7 @@ import TrendsPage from './components/TrendsPage';
 import { useAdminMode } from './lib/useAdminMode';
 import { setPlayerColorOverrides } from './lib/colors';
 import { DEFAULT_EVENT_DATE_DISPLAY, setEventDateDisplaySettings } from './lib/eventDateDisplay';
+import { DEFAULT_YARDAGE_BAND_SETTINGS, normalizeYardageBandSettings } from './lib/yardage';
 import {
   PlusCircle, Trophy, Target,
   Sun, Moon, Lock, Unlock, BarChart3, Settings,
@@ -43,6 +44,7 @@ import { useFilteredEvents } from './lib/useFilteredEvents';
 import './App.css';
 
 type Tab = 'overview' | 'trends' | 'scoring' | 'settings';
+type OverviewPanel = 'current-rankings' | 'ranking-history' | 'cumulative-points-race' | 'points-by-player' | 'points-matrix';
 
 const ALL_TABS: { id: Tab; label: string; icon: React.ReactNode; adminOnly?: boolean }[] = [
   { id: 'overview',  label: 'Overview',    icon: <Trophy size={16} /> },
@@ -81,6 +83,7 @@ const DEFAULT_ANALYSIS_SETTINGS: LeagueAnalysisSettings = {
     clutchFactor: 0.03,
   },
 };
+
 const EMPTY_LEAGUE: LeagueData = {
   leagueName: 'Loading…',
   leagueImage: undefined,
@@ -88,6 +91,7 @@ const EMPTY_LEAGUE: LeagueData = {
   adjustedScoring: { ...DEFAULT_ADJUSTED_SCORING },
   eventDateDisplay: { ...DEFAULT_EVENT_DATE_DISPLAY },
   weatherSettings: { ...DEFAULT_WEATHER_SETTINGS },
+  yardageBandSettings: { ...DEFAULT_YARDAGE_BAND_SETTINGS },
   analysisSettings: { ...DEFAULT_ANALYSIS_SETTINGS, weights: { ...DEFAULT_ANALYSIS_SETTINGS.weights } },
   events: [],
 };
@@ -123,9 +127,7 @@ export default function App() {
   const [profilePlayer, setProfilePlayer] = useState<string | null>(null);
   const [holeProfile, setHoleProfile] = useState<{ holeNum: number; nine: 'front' | 'back' } | null>(null);
   const [pointsRankBasis, setPointsRankBasis] = useState<'raw' | 'adjusted'>('raw');
-  const [showSeasonCumulative, setShowSeasonCumulative] = useState(false);
-  const [showSeasonPointsByPlayer, setShowSeasonPointsByPlayer] = useState(false);
-  const [showSeasonPointsMatrix, setShowSeasonPointsMatrix] = useState(false);
+  const [overviewPanel, setOverviewPanel] = useState<OverviewPanel>('current-rankings');
   const [scoringEventIds, setScoringEventIds] = useState<string[] | null>(null);
   const [trendsEventIds, setTrendsEventIds] = useState<string[] | null>(null);
 
@@ -168,6 +170,7 @@ export default function App() {
         leagueData = {
           ...leagueData,
           adjustedScoring: { ...DEFAULT_ADJUSTED_SCORING, ...(leagueData.adjustedScoring ?? {}) },
+          yardageBandSettings: normalizeYardageBandSettings(leagueData.yardageBandSettings),
           analysisSettings: {
             ...DEFAULT_ANALYSIS_SETTINGS,
             ...(leagueData.analysisSettings ?? {}),
@@ -187,6 +190,7 @@ export default function App() {
           adjustedScoring: { ...DEFAULT_ADJUSTED_SCORING, ...(snap.league.adjustedScoring ?? {}) },
           eventDateDisplay: { ...DEFAULT_EVENT_DATE_DISPLAY, ...(snap.league.eventDateDisplay ?? {}) },
           weatherSettings: { ...DEFAULT_WEATHER_SETTINGS, ...(snap.league.weatherSettings ?? {}) },
+          yardageBandSettings: normalizeYardageBandSettings(snap.league.yardageBandSettings),
           analysisSettings: {
             ...DEFAULT_ANALYSIS_SETTINGS,
             ...(snap.league.analysisSettings ?? {}),
@@ -269,6 +273,7 @@ export default function App() {
       adjustedScoring: { ...DEFAULT_ADJUSTED_SCORING },
       eventDateDisplay: { ...DEFAULT_EVENT_DATE_DISPLAY },
       weatherSettings: { ...DEFAULT_WEATHER_SETTINGS },
+      yardageBandSettings: { ...DEFAULT_YARDAGE_BAND_SETTINGS },
       analysisSettings: { ...DEFAULT_ANALYSIS_SETTINGS, weights: { ...DEFAULT_ANALYSIS_SETTINGS.weights } },
       events: [],
     };
@@ -458,6 +463,15 @@ export default function App() {
         ...settings,
         weights: { ...DEFAULT_ANALYSIS_SETTINGS.weights, ...(settings.weights ?? {}) },
       },
+    };
+    setLeague(updated);
+    saveLeagueDataById(activeLeagueId, updated);
+  }, [activeLeagueId, league]);
+
+  const handleLeagueYardageBandSettingsChange = useCallback((settings: LeagueData['yardageBandSettings']) => {
+    const updated = {
+      ...league,
+      yardageBandSettings: normalizeYardageBandSettings(settings),
     };
     setLeague(updated);
     saveLeagueDataById(activeLeagueId, updated);
@@ -769,58 +783,94 @@ export default function App() {
         <div className="charts-area">
           {activeTab === 'overview' && (
             <div className="overview-stack">
-              <BumpChart
-                events={filteredEvents}
-                adjustedScoringMode={league.adjustedScoring.mode}
-                onPlayerClick={setProfilePlayer}
-                showHistory
-                historyCollapsible
-                historyCollapsedByDefault
-              />
-              <SeasonDashboard events={filteredEvents} courseConfig={courseConfig}>
-                <div className="chart-container" style={{ marginTop: 16 }}>
-                  <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 12 }}>
-                    <span style={{ color: 'var(--text)', fontSize: 14, fontWeight: 700 }}>Cumulative Points Race</span>
-                    <button className="btn-secondary" onClick={() => setShowSeasonCumulative((prev) => !prev)}>
-                      {showSeasonCumulative ? 'Collapse' : 'Expand'}
+              <div className="chart-container overview-panel-card" style={{ marginTop: 0 }}>
+                <div className="overview-panel-tabs" role="tablist" aria-label="Overview rankings tabs">
+                  {[
+                    { id: 'current-rankings', label: 'Current Rankings' },
+                    { id: 'ranking-history', label: 'Ranking History' },
+                    { id: 'cumulative-points-race', label: 'Cumulative Points Race' },
+                    { id: 'points-by-player', label: 'Points by Player' },
+                    { id: 'points-matrix', label: 'Points Matrix' },
+                  ].map((panel) => (
+                    <button
+                      key={panel.id}
+                      type="button"
+                      role="tab"
+                      aria-selected={overviewPanel === panel.id}
+                      className={`overview-panel-tab ${overviewPanel === panel.id ? 'active' : ''}`}
+                      onClick={() => setOverviewPanel(panel.id as OverviewPanel)}
+                    >
+                      {panel.label}
                     </button>
-                  </div>
-                  {showSeasonCumulative && (
-                    <div style={{ marginTop: 12 }}>
-                      <CumulativePointsChart events={filteredEvents} onOpenPlayer={setProfilePlayer} rankBasis={effectivePointsRankBasis} />
-                    </div>
-                  )}
+                  ))}
                 </div>
 
-                {league.adjustedScoring.mode !== 'none' && (showSeasonPointsByPlayer || showSeasonPointsMatrix) && (
-                  <div className="chart-container" style={{ display: 'flex', alignItems: 'center', gap: 8, paddingTop: 10, paddingBottom: 10, marginTop: 16 }}>
-                    <span style={{ color: 'var(--text2)', fontSize: 12 }}>Points basis:</span>
-                    <button
-                      className={`btn-secondary rank-basis-btn ${effectivePointsRankBasis === 'raw' ? 'rank-basis-btn-active' : ''}`}
-                      style={{ padding: '4px 10px' }}
-                      onClick={() => setPointsRankBasis('raw')}
-                    >
-                      Total Points
-                    </button>
-                    <button
-                      className={`btn-secondary rank-basis-btn ${effectivePointsRankBasis === 'adjusted' ? 'rank-basis-btn-active' : ''}`}
-                      style={{ padding: '4px 10px' }}
-                      onClick={() => setPointsRankBasis('adjusted')}
-                    >
-                      Adjusted Points
-                    </button>
-                  </div>
-                )}
+                <div className="overview-panel-content">
+                  {overviewPanel === 'current-rankings' && (
+                    <BumpChart
+                      events={filteredEvents}
+                      adjustedScoringMode={league.adjustedScoring.mode}
+                      onPlayerClick={setProfilePlayer}
+                      showHistory={false}
+                    />
+                  )}
 
-                <div className="chart-container" style={{ marginTop: 16 }}>
-                  <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 12, flexWrap: 'wrap' }}>
-                    <span style={{ color: 'var(--text)', fontSize: 14, fontWeight: 700 }}>Points by Player</span>
-                    <button className="btn-secondary" onClick={() => setShowSeasonPointsByPlayer((prev) => !prev)}>
-                      {showSeasonPointsByPlayer ? 'Collapse' : 'Expand'}
-                    </button>
-                  </div>
-                  {showSeasonPointsByPlayer && (
-                    <div style={{ marginTop: 12 }}>
+                  {overviewPanel === 'ranking-history' && (
+                    <BumpChart
+                      events={filteredEvents}
+                      adjustedScoringMode={league.adjustedScoring.mode}
+                      onPlayerClick={setProfilePlayer}
+                      showTable={false}
+                      showHistory
+                    />
+                  )}
+
+                  {overviewPanel === 'cumulative-points-race' && (
+                    <>
+                      {league.adjustedScoring.mode !== 'none' && (
+                        <div className="overview-panel-controls">
+                          <span className="overview-panel-controls-label">Points basis:</span>
+                          <button
+                            className={`btn-secondary rank-basis-btn ${effectivePointsRankBasis === 'raw' ? 'rank-basis-btn-active' : ''}`}
+                            style={{ padding: '4px 10px' }}
+                            onClick={() => setPointsRankBasis('raw')}
+                          >
+                            Total Points
+                          </button>
+                          <button
+                            className={`btn-secondary rank-basis-btn ${effectivePointsRankBasis === 'adjusted' ? 'rank-basis-btn-active' : ''}`}
+                            style={{ padding: '4px 10px' }}
+                            onClick={() => setPointsRankBasis('adjusted')}
+                          >
+                            Adjusted Points
+                          </button>
+                        </div>
+                      )}
+                      <CumulativePointsChart events={filteredEvents} onOpenPlayer={setProfilePlayer} rankBasis={effectivePointsRankBasis} />
+                    </>
+                  )}
+
+                  {overviewPanel === 'points-by-player' && (
+                    <>
+                      {league.adjustedScoring.mode !== 'none' && (
+                        <div className="overview-panel-controls">
+                          <span className="overview-panel-controls-label">Points basis:</span>
+                          <button
+                            className={`btn-secondary rank-basis-btn ${effectivePointsRankBasis === 'raw' ? 'rank-basis-btn-active' : ''}`}
+                            style={{ padding: '4px 10px' }}
+                            onClick={() => setPointsRankBasis('raw')}
+                          >
+                            Total Points
+                          </button>
+                          <button
+                            className={`btn-secondary rank-basis-btn ${effectivePointsRankBasis === 'adjusted' ? 'rank-basis-btn-active' : ''}`}
+                            style={{ padding: '4px 10px' }}
+                            onClick={() => setPointsRankBasis('adjusted')}
+                          >
+                            Adjusted Points
+                          </button>
+                        </div>
+                      )}
                       <WeeklyPointsChart
                         events={filteredEvents}
                         onPlayerClick={setProfilePlayer}
@@ -829,19 +879,30 @@ export default function App() {
                         showBarChart
                         showMatrix={false}
                       />
-                    </div>
+                    </>
                   )}
-                </div>
 
-                <div className="chart-container" style={{ marginTop: 16 }}>
-                  <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 12, flexWrap: 'wrap' }}>
-                    <span style={{ color: 'var(--text)', fontSize: 14, fontWeight: 700 }}>Points Matrix</span>
-                    <button className="btn-secondary" onClick={() => setShowSeasonPointsMatrix((prev) => !prev)}>
-                      {showSeasonPointsMatrix ? 'Collapse' : 'Expand'}
-                    </button>
-                  </div>
-                  {showSeasonPointsMatrix && (
-                    <div style={{ marginTop: 12 }}>
+                  {overviewPanel === 'points-matrix' && (
+                    <>
+                      {league.adjustedScoring.mode !== 'none' && (
+                        <div className="overview-panel-controls">
+                          <span className="overview-panel-controls-label">Points basis:</span>
+                          <button
+                            className={`btn-secondary rank-basis-btn ${effectivePointsRankBasis === 'raw' ? 'rank-basis-btn-active' : ''}`}
+                            style={{ padding: '4px 10px' }}
+                            onClick={() => setPointsRankBasis('raw')}
+                          >
+                            Total Points
+                          </button>
+                          <button
+                            className={`btn-secondary rank-basis-btn ${effectivePointsRankBasis === 'adjusted' ? 'rank-basis-btn-active' : ''}`}
+                            style={{ padding: '4px 10px' }}
+                            onClick={() => setPointsRankBasis('adjusted')}
+                          >
+                            Adjusted Points
+                          </button>
+                        </div>
+                      )}
                       <WeeklyPointsChart
                         events={filteredEvents}
                         onPlayerClick={setProfilePlayer}
@@ -850,10 +911,11 @@ export default function App() {
                         showBarChart={false}
                         showMatrix
                       />
-                    </div>
+                    </>
                   )}
                 </div>
-              </SeasonDashboard>
+              </div>
+              <SeasonDashboard events={filteredEvents} courseConfig={courseConfig} />
               <WeeklyRecapPage events={filteredEvents} courseConfig={courseConfig} onPlayerClick={setProfilePlayer} onHoleClick={(n, nine) => setHoleProfile({ holeNum: n, nine })} />
             </div>
           )}
@@ -862,6 +924,7 @@ export default function App() {
               events={trendsEvents}
               allEvents={filteredEvents}
               courseConfig={courseConfig}
+              yardageBandSettings={league.yardageBandSettings}
               handicapMode={league.handicapMode}
               analysisSettings={league.analysisSettings}
               filterEventIds={trendsEventIds}
@@ -911,6 +974,7 @@ export default function App() {
               onEventDateDisplayChange={handleEventDateDisplayChange}
               onLeagueWeatherSettingsChange={handleLeagueWeatherSettingsChange}
               onLeagueAnalysisSettingsChange={handleLeagueAnalysisSettingsChange}
+              onLeagueYardageBandSettingsChange={handleLeagueYardageBandSettingsChange}
               onClearAllEvents={handleClearAllEvents}
               onDeleteLeague={handleDeleteLeague}
               onCreateLeague={handleCreateLeague}
@@ -936,7 +1000,7 @@ export default function App() {
           }}
         />
       )}
-      {profilePlayer && <PlayerProfileModal playerName={profilePlayer} events={filteredEvents} courseConfig={courseConfig} handicapMode={league.handicapMode} adjustedScoring={league.adjustedScoring} onHoleClick={(n, nine) => { setProfilePlayer(null); setHoleProfile({ holeNum: n, nine }); }} onClose={() => setProfilePlayer(null)} />}
+      {profilePlayer && <PlayerProfileModal playerName={profilePlayer} events={filteredEvents} courseConfig={courseConfig} yardageBandSettings={league.yardageBandSettings} handicapMode={league.handicapMode} analysisSettings={league.analysisSettings} adjustedScoring={league.adjustedScoring} onHoleClick={(n, nine) => { setProfilePlayer(null); setHoleProfile({ holeNum: n, nine }); }} onClose={() => setProfilePlayer(null)} />}
 
       <nav className="mobile-bottom-nav">
         {TABS.map(tab => (

@@ -141,7 +141,9 @@ export default memo(function BumpChart({
         const prevStanding = standingsPrev.get(playerName);
         const change = prevStanding ? prevStanding.position - latestStanding.position : null; // positive = moved up
         const gap = leader - latestStanding.cumulativePoints;
-        const evPts = latest.players.find(p => p.playerName === playerName)?.points ?? null;
+        const latestEventEntry = latest.players.find((p) => p.playerName === playerName);
+        const evDnp = latestEventEntry?.didNotPlay ?? false;
+        const evPts = latestEventEntry && !latestEventEntry.didNotPlay ? latestEventEntry.points : null;
         const eventCount = sorted.reduce((count, event) => {
           const player = event.players.find((candidate) => candidate.playerName === playerName);
           return player && !player.didNotPlay ? count + 1 : count;
@@ -157,6 +159,7 @@ export default memo(function BumpChart({
           change,
           gap,
           evPts,
+          evDnp,
           eventCount,
           avgPoints: eventCount > 0 ? Math.round((rawTotal / eventCount) * 100) / 100 : null,
           tied: tiedPositions.has(latestStanding.position),
@@ -367,7 +370,7 @@ export default memo(function BumpChart({
                     </td>
                     <td className="bump-td-evpts">
                       <span style={getEventPointsStyle(row.evPts, row.latestMinPoints, row.latestMaxPoints)}>
-                        {row.evPts !== null ? row.evPts : '—'}
+                        {row.evDnp ? 'DNP' : (row.evPts !== null ? row.evPts : '—')}
                       </span>
                     </td>
                   </tr>

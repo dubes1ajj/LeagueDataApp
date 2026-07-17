@@ -9,6 +9,7 @@ import type {
   HandicapMode,
   LeagueAnalysisSettings,
   LeagueData,
+  LeagueYardageBandSettings,
   LeagueWeatherSettings,
   PlayerConfig,
 } from '../types/golf';
@@ -52,6 +53,7 @@ interface SettingsPageProps {
   onEventDateDisplayChange: (settings: EventDateDisplaySettings) => void;
   onLeagueWeatherSettingsChange: (settings: LeagueWeatherSettings) => void;
   onLeagueAnalysisSettingsChange: (settings: LeagueAnalysisSettings) => void;
+  onLeagueYardageBandSettingsChange: (settings: LeagueYardageBandSettings) => void;
   onClearAllEvents: () => void;
   onDeleteLeague: () => void;
   onCreateLeague: (leagueId: string, leagueName: string) => void;
@@ -88,6 +90,7 @@ export default memo(function SettingsPage({
   onEventDateDisplayChange,
   onLeagueWeatherSettingsChange,
   onLeagueAnalysisSettingsChange,
+  onLeagueYardageBandSettingsChange,
   onClearAllEvents,
   onDeleteLeague,
   onCreateLeague,
@@ -196,6 +199,7 @@ export default memo(function SettingsPage({
               onEventDateDisplayChange={onEventDateDisplayChange}
               onLeagueWeatherSettingsChange={onLeagueWeatherSettingsChange}
               onLeagueAnalysisSettingsChange={onLeagueAnalysisSettingsChange}
+              onLeagueYardageBandSettingsChange={onLeagueYardageBandSettingsChange}
               onClearAllEvents={onClearAllEvents}
               onDeleteLeague={onDeleteLeague}
             />

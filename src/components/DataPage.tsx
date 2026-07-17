@@ -2,11 +2,13 @@ import { useEffect, useMemo, useRef, useState } from 'react';
 import type {
   AnalysisMetricKey,
   AdjustedScoringSettings,
+  EventData,
   EventDateDisplaySettings,
   EventDateFormat,
   EventTimeFormat,
   LeagueAnalysisSettings,
   LeagueData,
+  LeagueYardageBandSettings,
   LeagueWeatherSettings,
   CourseConfig,
   HandicapMode,
@@ -44,6 +46,7 @@ interface DataPageProps {
   onEventDateDisplayChange: (settings: EventDateDisplaySettings) => void;
   onLeagueWeatherSettingsChange?: (settings: LeagueWeatherSettings) => void;
   onLeagueAnalysisSettingsChange?: (settings: LeagueAnalysisSettings) => void;
+  onLeagueYardageBandSettingsChange?: (settings: LeagueYardageBandSettings) => void;
   onClearAllEvents: () => void;
   onLeagueImageChange?: (imageDataUrl: string | null) => void;
   onDeleteLeague?: () => void;
@@ -57,6 +60,28 @@ interface UrlRow {
   status: UrlStatus;
   label?: string;
   error?: string;
+}
+
+interface SourceUrlEntry {
+  url: string;
+  events: Array<{
+    id: string;
+    eventNumber: number;
+    eventDate: string;
+    nineHoles: 'front' | 'back';
+  }>;
+}
+
+function normalizeImportUrl(value: string): string {
+  const trimmed = value.trim();
+  if (!trimmed) return trimmed;
+  try {
+    const parsed = new URL(trimmed);
+    parsed.hash = '';
+    return parsed.toString();
+  } catch {
+    return trimmed;
+  }
 }
 
 function createDefaultPlayerSheetImportOptions(): PlayerSheetImportOptions {
@@ -187,6 +212,7 @@ interface LeagueSettingsSectionProps {
   onEventDateDisplayChange: (settings: EventDateDisplaySettings) => void;
   onLeagueWeatherSettingsChange: (settings: LeagueWeatherSettings) => void;
   onLeagueAnalysisSettingsChange: (settings: LeagueAnalysisSettings) => void;
+  onLeagueYardageBandSettingsChange: (settings: LeagueYardageBandSettings) => void;
   onClearAllEvents: () => void;
   onDeleteLeague: () => void;
 }
@@ -345,6 +371,7 @@ export function LeagueSettingsSection({
   onEventDateDisplayChange,
   onLeagueWeatherSettingsChange,
   onLeagueAnalysisSettingsChange,
+  onLeagueYardageBandSettingsChange,
   onClearAllEvents,
   onDeleteLeague,
 }: LeagueSettingsSectionProps) {
@@ -370,6 +397,17 @@ export function LeagueSettingsSection({
       weights: {
         ...league.analysisSettings.weights,
         [key]: nextValue,
+      },
+    });
+  }
+
+  function updateYardageBandThreshold(par: 'par3' | 'par4' | 'par5', threshold: 'shortMax' | 'midMax' | 'longMax', value: number) {
+    const nextValue = Number.isFinite(value) ? Math.max(1, Math.round(value)) : 1;
+    onLeagueYardageBandSettingsChange({
+      ...league.yardageBandSettings,
+      [par]: {
+        ...league.yardageBandSettings[par],
+        [threshold]: nextValue,
       },
     });
   }
@@ -740,6 +778,62 @@ export function LeagueSettingsSection({
         </div>
       </div>
 
+      <div className="data-field-row" style={{ marginTop: 12, alignItems: 'flex-start' }}>
+        <label className="data-field-label">Yardage Bands</label>
+        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(220px, 1fr))', gap: 8, flex: 1 }}>
+          {(['par3', 'par4', 'par5'] as const).map((parKey) => {
+            const rowLabel = parKey === 'par3' ? 'Par 3' : parKey === 'par4' ? 'Par 4' : 'Par 5';
+            const thresholds = league.yardageBandSettings[parKey];
+            return (
+              <div key={parKey} className="recap-stat-card" style={{ gap: 8 }}>
+                <span className="recap-stat-label">{rowLabel} Cutoffs</span>
+                <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, minmax(64px, 1fr))', gap: 6 }}>
+                  <div>
+                    <label style={{ color: 'var(--text2)', fontSize: 11, display: 'block', marginBottom: 4 }}>Short {'<'}</label>
+                    <input
+                      className="url-input"
+                      type="number"
+                      min={1}
+                      step={1}
+                      value={thresholds.shortMax}
+                      onChange={(e) => updateYardageBandThreshold(parKey, 'shortMax', Number.parseInt(e.target.value, 10))}
+                    />
+                  </div>
+                  <div>
+                    <label style={{ color: 'var(--text2)', fontSize: 11, display: 'block', marginBottom: 4 }}>Mid {'<'}</label>
+                    <input
+                      className="url-input"
+                      type="number"
+                      min={1}
+                      step={1}
+                      value={thresholds.midMax}
+                      onChange={(e) => updateYardageBandThreshold(parKey, 'midMax', Number.parseInt(e.target.value, 10))}
+                    />
+                  </div>
+                  <div>
+                    <label style={{ color: 'var(--text2)', fontSize: 11, display: 'block', marginBottom: 4 }}>Long {'<'}</label>
+                    <input
+                      className="url-input"
+                      type="number"
+                      min={1}
+                      step={1}
+                      value={thresholds.longMax}
+                      onChange={(e) => updateYardageBandThreshold(parKey, 'longMax', Number.parseInt(e.target.value, 10))}
+                    />
+                  </div>
+                </div>
+                <span style={{ color: 'var(--text2)', fontSize: 11 }}>
+                  X-Long is any hole {'>='} Long cutoff.
+                </span>
+              </div>
+            );
+          })}
+          <span style={{ color: 'var(--text2)', fontSize: 12, gridColumn: '1 / -1' }}>
+            These thresholds drive Distance Profile and Yardage Trends labels and rankings.
+          </span>
+        </div>
+      </div>
+
       <div className="data-field-row" style={{ marginTop: 10 }}>
         <label className="data-field-label">Events loaded</label>
         <span style={{ color: 'var(--text2)', fontSize: 13 }}>{league.events.length} event{league.events.length !== 1 ? 's' : ''}</span>
@@ -889,12 +983,20 @@ export default function DataPage({
   availableLeagues,
   league, courseConfig, playerConfig,
   onImportSnapshot, onBulkEventsAdded, onLeagueNameChange, onLeagueHandicapModeChange, onLeagueAdjustedScoringChange, onEventDateDisplayChange, onLeagueWeatherSettingsChange, onLeagueAnalysisSettingsChange, onClearAllEvents, onLeagueImageChange, onDeleteLeague, onCreateLeague,
+  onLeagueYardageBandSettingsChange,
   hideLeagueSettings = false,
 }: DataPageProps) {
   // ── Bulk URL import ──────────────────────────────────────────────────────
   const [urlText, setUrlText] = useState('');
   const [urlRows, setUrlRows] = useState<UrlRow[]>([]);
   const [importing, setImporting] = useState(false);
+  const [refetchingUrls, setRefetchingUrls] = useState<Set<string>>(new Set());
+  const [sourceRefetchErrors, setSourceRefetchErrors] = useState<Record<string, string>>({});
+  const [sourceRefetchMessage, setSourceRefetchMessage] = useState('');
+  const [sourceAttachEventId, setSourceAttachEventId] = useState('');
+  const [sourceAttachUrl, setSourceAttachUrl] = useState('');
+  const [sourceAttachError, setSourceAttachError] = useState('');
+  const [sourceAttachSuccess, setSourceAttachSuccess] = useState('');
 
   // ── File import ──────────────────────────────────────────────────────────
   const fileRef = useRef<HTMLInputElement>(null);
@@ -970,6 +1072,95 @@ export default function DataPage({
     };
   }, [activeExcelPreviewSheetName, excelFile, excelPlayerSheetOptions, playerSheetModeActive]);
 
+  useEffect(() => {
+    setRefetchingUrls(new Set());
+    setSourceRefetchErrors({});
+    setSourceRefetchMessage('');
+    setSourceAttachError('');
+    setSourceAttachSuccess('');
+    setSourceAttachUrl('');
+    setSourceAttachEventId('');
+  }, [activeLeagueId]);
+
+  useEffect(() => {
+    if (sourceAttachEventId) return;
+    const latestEvent = [...league.events].sort((a, b) => b.eventNumber - a.eventNumber)[0];
+    if (latestEvent) {
+      setSourceAttachEventId(latestEvent.id);
+    }
+  }, [league.events, sourceAttachEventId]);
+
+  const sourceUrlEntries = useMemo<SourceUrlEntry[]>(() => {
+    const grouped = new Map<string, SourceUrlEntry>();
+    for (const event of league.events) {
+      if (event.sourceType !== 'url' || !event.sourceUrl) continue;
+      const key = normalizeImportUrl(event.sourceUrl);
+      const existing = grouped.get(key);
+      if (existing) {
+        existing.events.push({
+          id: event.id,
+          eventNumber: event.eventNumber,
+          eventDate: event.eventDate,
+          nineHoles: event.nineHoles,
+        });
+      } else {
+        grouped.set(key, {
+          url: key,
+          events: [{
+            id: event.id,
+            eventNumber: event.eventNumber,
+            eventDate: event.eventDate,
+            nineHoles: event.nineHoles,
+          }],
+        });
+      }
+    }
+    return Array.from(grouped.values())
+      .map((entry) => ({
+        ...entry,
+        events: [...entry.events].sort((a, b) => a.eventNumber - b.eventNumber),
+      }))
+      .sort((a, b) => {
+        const maxA = Math.max(...a.events.map((event) => event.eventNumber));
+        const maxB = Math.max(...b.events.map((event) => event.eventNumber));
+        return maxB - maxA || a.url.localeCompare(b.url);
+      });
+  }, [league.events]);
+
+  const sourceAttachEventOptions = useMemo(
+    () => [...league.events].sort((a, b) => b.eventNumber - a.eventNumber),
+    [league.events],
+  );
+
+  async function fetchEventFromSourceUrl(url: string): Promise<Omit<EventData, 'id'>> {
+    let parsedUrl: URL;
+    try {
+      parsedUrl = new URL(url.trim());
+    } catch {
+      throw new Error('Invalid URL');
+    }
+    if (!parsedUrl.hostname.includes('golfleague.net')) {
+      throw new Error('URL must be from service.golfleague.net');
+    }
+
+    const proxyPath = '/golf-proxy' + parsedUrl.pathname + parsedUrl.search;
+    const res = await fetch(proxyPath);
+    if (!res.ok) throw new Error(`HTTP ${res.status}`);
+    const html = await res.text();
+
+    const parsed = parseGolfSoftwareHTML(html);
+    if (!parsed) {
+      throw new Error('Could not find player data in the page.');
+    }
+
+    return {
+      ...parsed,
+      sourceType: 'url',
+      sourceUrl: parsedUrl.toString(),
+      sourceFetchedAt: new Date().toISOString(),
+    };
+  }
+
   // Parse URL list into rows
   function prepareUrls() {
     const lines = urlText
@@ -997,16 +1188,9 @@ export default function DataPage({
       setUrlRows([...updatedRows]);
 
       try {
-        const parsedUrl = new URL(row.url);
-        const proxyPath = '/golf-proxy' + parsedUrl.pathname + parsedUrl.search;
-        const res = await fetch(proxyPath);
-        if (!res.ok) throw new Error(`HTTP ${res.status}`);
-        const html = await res.text();
+        const parsed = await fetchEventFromSourceUrl(row.url);
 
-        const parsed = parseGolfSoftwareHTML(html);
-        if (!parsed) throw new Error('Could not find player data in the page.');
-
-        const eventData = { ...parsed, id: `event-${parsed.eventNumber}-${Date.now()}` };
+        const eventData: EventData = { ...parsed, id: `event-${parsed.eventNumber}-${Date.now()}` };
 
         // Add/replace event
         const existing = currentLeague.events.findIndex(e => e.eventNumber === eventData.eventNumber);
@@ -1036,6 +1220,151 @@ export default function DataPage({
 
     setImporting(false);
     onBulkEventsAdded(currentLeague, currentPlayerConfig);
+  }
+
+  async function refetchSourceUrls(urls: string[]) {
+    if (!urls.length || refetchingUrls.size > 0) return;
+
+    setSourceRefetchMessage('');
+    const errors: Record<string, string> = {};
+    let successCount = 0;
+
+    let currentLeague = { ...league };
+    let currentPlayerConfig = { ...playerConfig };
+
+    for (const url of urls) {
+      const normalizedUrl = normalizeImportUrl(url);
+      setRefetchingUrls((current) => {
+        const next = new Set(current);
+        next.add(normalizedUrl);
+        return next;
+      });
+
+      try {
+        const parsed = await fetchEventFromSourceUrl(normalizedUrl);
+        const matchingIndexes = currentLeague.events
+          .map((event, index) => ({ event, index }))
+          .filter(({ event }) => normalizeImportUrl(event.sourceUrl ?? '') === normalizedUrl)
+          .map(({ index }) => index);
+
+        if (!matchingIndexes.length) {
+          throw new Error('No matching event found for this source URL.');
+        }
+
+        const targetIndex = matchingIndexes.find((index) => currentLeague.events[index].eventNumber === parsed.eventNumber) ?? matchingIndexes[0];
+        const existingEvent = currentLeague.events[targetIndex];
+
+        const replacement: EventData = {
+          ...parsed,
+          id: existingEvent.id,
+          eventName: existingEvent.eventName,
+          eventWeather: existingEvent.eventWeather,
+        };
+
+        const nextEvents = currentLeague.events.map((event, index) => (index === targetIndex ? replacement : event));
+        currentLeague = {
+          ...currentLeague,
+          events: recalculateCumulativeStandings(nextEvents, currentLeague.adjustedScoring),
+        };
+        currentPlayerConfig = applyAutoHide(currentPlayerConfig, currentLeague.events);
+        successCount += 1;
+      } catch (err) {
+        errors[normalizedUrl] = (err as Error).message;
+      } finally {
+        setRefetchingUrls((current) => {
+          const next = new Set(current);
+          next.delete(normalizedUrl);
+          return next;
+        });
+      }
+    }
+
+    onBulkEventsAdded(currentLeague, currentPlayerConfig);
+    setSourceRefetchErrors(errors);
+    if (successCount > 0) {
+      setSourceRefetchMessage(`Refetched ${successCount} source URL${successCount === 1 ? '' : 's'} successfully.`);
+    }
+  }
+
+  function attachSourceUrlToEvent() {
+    setSourceAttachError('');
+    setSourceAttachSuccess('');
+
+    if (!sourceAttachEventId) {
+      setSourceAttachError('Choose an event to attach this source URL to.');
+      return;
+    }
+
+    const normalizedUrl = normalizeImportUrl(sourceAttachUrl);
+    if (!normalizedUrl) {
+      setSourceAttachError('Enter a source URL first.');
+      return;
+    }
+
+    let parsedUrl: URL;
+    try {
+      parsedUrl = new URL(normalizedUrl);
+    } catch {
+      setSourceAttachError('Enter a valid URL.');
+      return;
+    }
+
+    if (!parsedUrl.hostname.includes('golfleague.net')) {
+      setSourceAttachError('URL must be from service.golfleague.net.');
+      return;
+    }
+
+    const targetEvent = league.events.find((event) => event.id === sourceAttachEventId);
+    if (!targetEvent) {
+      setSourceAttachError('Selected event was not found.');
+      return;
+    }
+
+    const updatedLeague: LeagueData = {
+      ...league,
+      events: league.events.map((event) => (
+        event.id === sourceAttachEventId
+          ? {
+            ...event,
+            sourceType: 'url',
+            sourceUrl: parsedUrl.toString(),
+            sourceFetchedAt: event.sourceFetchedAt ?? new Date().toISOString(),
+          }
+          : event
+      )),
+    };
+
+    onBulkEventsAdded(updatedLeague, playerConfig);
+    setSourceAttachSuccess(`Attached source URL to Event ${targetEvent.eventNumber}.`);
+    setSourceAttachUrl('');
+  }
+
+  function detachSourceUrlFromEvent(eventId: string) {
+    setSourceAttachError('');
+    setSourceAttachSuccess('');
+
+    const targetEvent = league.events.find((event) => event.id === eventId);
+    if (!targetEvent) {
+      setSourceAttachError('Selected event was not found.');
+      return;
+    }
+
+    const updatedLeague: LeagueData = {
+      ...league,
+      events: league.events.map((event) => (
+        event.id === eventId
+          ? {
+            ...event,
+            sourceType: undefined,
+            sourceUrl: undefined,
+            sourceFetchedAt: undefined,
+          }
+          : event
+      )),
+    };
+
+    onBulkEventsAdded(updatedLeague, playerConfig);
+    setSourceAttachSuccess(`Removed source URL link from Event ${targetEvent.eventNumber}.`);
   }
 
   function clearCompleted() {
@@ -1234,6 +1563,7 @@ export default function DataPage({
             onEventDateDisplayChange={onEventDateDisplayChange}
             onLeagueWeatherSettingsChange={onLeagueWeatherSettingsChange ?? (() => {})}
             onLeagueAnalysisSettingsChange={onLeagueAnalysisSettingsChange ?? (() => {})}
+            onLeagueYardageBandSettingsChange={onLeagueYardageBandSettingsChange ?? (() => {})}
             onClearAllEvents={onClearAllEvents}
             onDeleteLeague={onDeleteLeague ?? (() => {})}
           />
@@ -1775,6 +2105,135 @@ export default function DataPage({
               )}
               <button className="btn-secondary" onClick={() => { setUrlRows([]); setUrlText(''); }}>
                 Reset
+              </button>
+            </div>
+          </>
+        )}
+      </div>
+
+      {/* ── Source URL registry ───────────────────────────────────────── */}
+      <div className="chart-container">
+        <h3 className="chart-title">Source URL Registry</h3>
+        <p className="chart-subtitle">
+          URL-imported events are tracked here so you can refetch source pages when makeup rounds update old weeks.
+        </p>
+
+        <div className="data-confirm-box" style={{ marginBottom: 12 }}>
+          <p style={{ color: 'var(--text)', marginBottom: 8, fontWeight: 600 }}>Attach URL to Existing Event</p>
+          <p style={{ color: 'var(--text2)', fontSize: 12, marginBottom: 10 }}>
+            Backfill older events by linking the original standings URL. Once attached, the event appears in this registry and can be refetched.
+          </p>
+          <div style={{ display: 'grid', gridTemplateColumns: 'minmax(160px, 220px) minmax(240px, 1fr) auto', gap: 8 }}>
+            <select
+              className="url-input"
+              value={sourceAttachEventId}
+              onChange={(e) => setSourceAttachEventId(e.target.value)}
+            >
+              {sourceAttachEventOptions.map((event) => (
+                <option key={event.id} value={event.id}>
+                  {`Event ${event.eventNumber}${formatEventDateDisplay(event.eventDate) ? ` · ${formatEventDateDisplay(event.eventDate)}` : ''} · ${event.nineHoles === 'back' ? 'Back 9' : 'Front 9'}`}
+                </option>
+              ))}
+            </select>
+            <input
+              className="url-input"
+              type="url"
+              placeholder="https://service.golfleague.net/lm/.../player_standings_by_points-01.html"
+              value={sourceAttachUrl}
+              onChange={(e) => setSourceAttachUrl(e.target.value)}
+            />
+            <button className="btn-secondary" onClick={attachSourceUrlToEvent} disabled={league.events.length === 0}>
+              Attach URL
+            </button>
+          </div>
+          {sourceAttachError && <p className="error" style={{ marginTop: 8 }}>{sourceAttachError}</p>}
+          {sourceAttachSuccess && (
+            <p style={{ color: '#22c55e', fontSize: 13, marginTop: 8, display: 'flex', alignItems: 'center', gap: 6 }}>
+              <CheckCircle size={14} /> {sourceAttachSuccess}
+            </p>
+          )}
+        </div>
+
+        {sourceRefetchMessage && (
+          <p style={{ color: '#22c55e', fontSize: 13, marginBottom: 10, display: 'flex', alignItems: 'center', gap: 6 }}>
+            <CheckCircle size={14} /> {sourceRefetchMessage}
+          </p>
+        )}
+
+        {sourceUrlEntries.length === 0 ? (
+          <p style={{ color: 'var(--text2)', fontSize: 13 }}>
+            No URL-based event sources tracked yet. Use Add Event Data or Bulk URL Import to populate this list.
+          </p>
+        ) : (
+          <>
+            <div className="bulk-url-list">
+              {sourceUrlEntries.map((entry) => {
+                const isLoading = refetchingUrls.has(entry.url);
+                const error = sourceRefetchErrors[entry.url];
+                return (
+                  <div key={entry.url} className={`bulk-url-row ${isLoading ? 'bulk-url-loading' : error ? 'bulk-url-error' : 'bulk-url-done'}`}>
+                    <div className="bulk-url-icon">
+                      {isLoading ? <Loader size={15} className="spin" /> : error ? <XCircle size={15} style={{ color: '#ef4444' }} /> : <CheckCircle size={15} style={{ color: '#22c55e' }} />}
+                    </div>
+                    <div className="bulk-url-info">
+                      <span className="bulk-url-text">{entry.url}</span>
+                      <span style={{ color: 'var(--text2)', fontSize: 11 }}>
+                        Events: {entry.events.map((event) => event.eventNumber).join(', ')}
+                      </span>
+                      <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6, marginTop: 6 }}>
+                        {entry.events.map((event) => (
+                          <span
+                            key={event.id}
+                            style={{
+                              display: 'inline-flex',
+                              alignItems: 'center',
+                              gap: 6,
+                              border: '1px solid var(--border)',
+                              borderRadius: 999,
+                              padding: '2px 8px',
+                              fontSize: 11,
+                              color: 'var(--text2)',
+                              background: 'var(--bg3)',
+                            }}
+                          >
+                            {`Event ${event.eventNumber}${formatEventDateDisplay(event.eventDate) ? ` · ${formatEventDateDisplay(event.eventDate)}` : ''} · ${event.nineHoles === 'back' ? 'Back 9' : 'Front 9'}`}
+                            <button
+                              type="button"
+                              className="icon-btn"
+                              title={`Remove source URL from Event ${event.eventNumber}`}
+                              onClick={() => detachSourceUrlFromEvent(event.id)}
+                              style={{ width: 18, height: 18, padding: 0 }}
+                            >
+                              <XCircle size={12} />
+                            </button>
+                          </span>
+                        ))}
+                      </div>
+                      {error && <span className="bulk-url-error">{error}</span>}
+                    </div>
+                    <button
+                      className="btn-secondary"
+                      style={{ alignSelf: 'center' }}
+                      onClick={() => refetchSourceUrls([entry.url])}
+                      disabled={isLoading || refetchingUrls.size > 0}
+                    >
+                      Refetch
+                    </button>
+                  </div>
+                );
+              })}
+            </div>
+
+            <div style={{ display: 'flex', gap: 10, marginTop: 14, flexWrap: 'wrap' }}>
+              <button
+                className="btn-primary"
+                onClick={() => refetchSourceUrls(sourceUrlEntries.map((entry) => entry.url))}
+                disabled={refetchingUrls.size > 0}
+                style={{ display: 'inline-flex', alignItems: 'center', gap: 8 }}
+              >
+                {refetchingUrls.size > 0
+                  ? <><Loader size={14} className="spin" /> Refetching…</>
+                  : <><Link size={14} /> Refetch all sources</>}
               </button>
             </div>
           </>

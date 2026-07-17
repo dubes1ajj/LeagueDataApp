@@ -1,12 +1,14 @@
-import { useMemo } from 'react';
+import { useMemo, useState } from 'react';
 import {
   LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip,
   ResponsiveContainer, BarChart, Bar, Cell, RadarChart,
   PolarGrid, PolarAngleAxis, Radar
 } from 'recharts';
-import type { AdjustedScoringSettings, EventData, CourseConfig, HandicapMode } from '../types/golf';
+import type { AdjustedScoringSettings, AnalysisMetricKey, EventData, CourseConfig, HandicapMode, LeagueAnalysisSettings, LeagueYardageBandSettings } from '../types/golf';
 import { getPlayerColor } from '../lib/colors';
+import { buildLeagueAnalysisRanking } from '../lib/analysisRanking';
 import { computeBreakdown, getParsForNine } from '../lib/scoring';
+import { getYardageBandDescription, getYardageBandKey, YARDAGE_BANDS, type YardageBandKey } from '../lib/yardage';
 import { useChartColors } from '../lib/useChartColors';
 import { X, TrendingUp, TrendingDown, Minus } from 'lucide-react';
 import { getEventDisplayName } from '../lib/eventNames';
@@ -16,7 +18,9 @@ interface PlayerProfileModalProps {
   playerName: string;
   events: EventData[];
   courseConfig: CourseConfig | null;
+  yardageBandSettings: LeagueYardageBandSettings;
   handicapMode: HandicapMode;
+  analysisSettings: LeagueAnalysisSettings;
   adjustedScoring?: AdjustedScoringSettings;
   onHoleClick?: (holeNum: number, nine: 'front' | 'back') => void;
   onClose: () => void;
@@ -29,6 +33,48 @@ function avg(nums: number[]): number {
 
 function formatSigned(value: number, digits = 1): string {
   return `${value >= 0 ? '+' : ''}${value.toFixed(digits)}`;
+}
+
+function clamp(value: number, min: number, max: number): number {
+  return Math.max(min, Math.min(max, value));
+}
+
+function renderStarRating(stars: number) {
+  const clamped = clamp(stars, 0, 5);
+  const fillPercent = `${(clamped / 5) * 100}%`;
+  return (
+    <span className="pp-star-rating" aria-label={`${clamped.toFixed(1)} stars`}>
+      <span className="pp-star-rating-base">☆☆☆☆☆</span>
+      <span className="pp-star-rating-fill" style={{ width: fillPercent }}>★★★★★</span>
+    </span>
+  );
+}
+
+function formatDeltaNumber(value: number): string {
+  const normalized = Number(value.toFixed(2));
+  if (Math.abs(normalized % 1) < 1e-9) {
+    return normalized.toFixed(0);
+  }
+  if (Math.abs((normalized * 10) % 1) < 1e-9) {
+    return normalized.toFixed(1);
+  }
+  return normalized.toFixed(2);
+}
+
+function formatMetricDelta(value: number | null) {
+  if (value === null || !Number.isFinite(value)) {
+    return { deltaLabel: '', deltaClassName: 'compare-metric-delta compare-metric-delta-neutral' };
+  }
+
+  const normalized = Number(value.toFixed(2));
+  if (Math.abs(normalized) < 1e-9) {
+    return { deltaLabel: '', deltaClassName: 'compare-metric-delta compare-metric-delta-neutral' };
+  }
+
+  return {
+    deltaLabel: ` (${normalized > 0 ? '+' : ''}${formatDeltaNumber(normalized)})`,
+    deltaClassName: `compare-metric-delta ${normalized > 0 ? 'compare-metric-delta-positive' : 'compare-metric-delta-negative'}`,
+  };
 }
 
 function getTrend(values: number[]): 'up' | 'down' | 'flat' {
@@ -103,56 +149,215 @@ type NicknameProfile = {
   score: number;
 };
 
+type PlayerRoundEntry = {
+  ev: EventData;
+  data: EventData['players'][number] | null;
+  standing: EventData['standings'][number] | null;
+};
+
+type ProfileMetricsSummary = {
+  eventWins: number;
+  topThree: number;
+  cleanCards: number;
+  birdieRate: number | null;
+  parRate: number | null;
+  damageControl: number | null;
+  blowupAvoidance: number | null;
+  bounceBackRate: number | null;
+  bounceBackSuccess: number;
+  bounceBackChances: number;
+  clutchPerformance: number | null;
+  handicapOutperformance: number | null;
+  bogeysOrWorse: number;
+  totalTrackedHoles: number;
+};
+
+type YardageBandRow = {
+  key: YardageBandKey;
+  label: string;
+  playerHoles: number;
+  holeNumbers: number[];
+  playerAvgVsPar: number | null;
+  fieldAvgVsPar: number | null;
+  playerEagleCount: number;
+  playerEagleRate: number | null;
+  playerBirdieCount: number;
+  playerBirdieRate: number | null;
+  playerParCount: number;
+  playerParRate: number | null;
+  playerBogeyCount: number;
+  playerBogeyRate: number | null;
+  playerDoubleBogeyCount: number;
+  playerDoubleBogeyRate: number | null;
+  playerTriplePlusCount: number;
+  playerTriplePlusRate: number | null;
+  playerYardsPerStroke: number | null;
+  fieldYardsPerStroke: number | null;
+};
+
 const NICKNAME_PARTS: Record<NicknameCategory, { pool: string[]; fallback: string }> = {
   elite: {
-    pool: ['Sniper', 'Captain Hook', 'Christopher Columbus', 'Arsonist', 'Crypto Bro', 'Flagstick Taxman', 'Putter Assassin', 'Scorecard Reaper'],
+    pool: ['American Sniper', 'Michael Jordan', 'Muhammad Ali', 'Fore Father', 'Tom Brady'],
     fallback: 'Sniper',
   },
   contender: {
-    pool: ['Accountant', 'Cart Path Lurker', 'Podium Parking Ticket', 'Birdie Bureaucrat', 'Pin Collector', 'Scorecard Squatter', 'Weekend Menace', 'Fairway Foreclosure'],
-    fallback: 'Accountant',
+    pool: ['Pencil Pro', 'Fairway to Heaven', 'Thaddeus Gonnaplay', 'Seymour Fairways', 'Vladimir Puttin', 'Crypto Bro', 'Dalai Lama', 'Gunga Galunga', 'Leech'],
+    fallback: 'Pencil Pro',
   },
   firestarter: {
-    pool: ['Hosel Rocket Scientist', 'Worm Burner', 'Arsonist', 'Tee Box Torch', 'Fairway Flamethrower', 'Backspin Bomber', 'Pin Seeker', 'Birdie Blast Furnace'],
+    pool: ['Hosel Rocket Scientist', 'Worm Burner', 'Arsonist', 'Atomic Wedgie', 'Jabba the Putt', 'Underwear Bomber', 'Big-Tuna'],
     fallback: 'Hosel Rocket Scientist',
   },
   cleanup: {
-    pool: ['Roomba', 'Beaver Pelt', 'Bogey Janitor', 'Mulligan Medic', 'Fairway Plumber', 'Duct Tape Caddie', 'Scorecard Custodian', 'Cardboard Surgeon'],
+    pool: ['Roomba', 'Beaver Pelt', 'Windex', 'Mulligan Medic', 'Will Hunting', 'Scorecard Custodian', 'Carl Spackler'],
     fallback: 'Roomba',
   },
   responder: {
-    pool: ['Houdini', 'Witness Protection', 'Poltergeist', 'Bounce-Back Refund', 'Bogey Escape Plan', 'Round Rebooter', 'Do-Over Dealer', 'Apology Department'],
+    pool: ['Houdini', 'Witness Protection', 'Kim K', 'Drawshank Redemption', 'Poulter-geist', 'Bounce-Back Refund', 'Round Rebooter', 'Do-Over Dealer', 'Apology Department'],
     fallback: 'Houdini',
   },
   closer: {
-    pool: ['Back Nine Butcher', 'Captain Hook', 'Final Putt Coroner', 'Parking Lot Undertaker', '18th Hole Taxman', 'Lights-Out Closer', 'Card Killer', 'Last-Hole Collector'],
+    pool: ['Back Nine Butcher', 'Clutch King', 'Pacemaker', 'Final Putt Coroner', 'Parking Lot Undertaker', 'Last Hole Taxman', 'Lights-Out Closer', 'Card Killer', 'Last-Hole Collector'],
     fallback: 'Back Nine Butcher',
   },
   netBandit: {
-    pool: ['Crypto Bro', 'Christopher Columbus', 'Accountant', 'Handicap Hustle', 'Net Par Bandit', 'Scorecard Forger', 'Popsie Plus Pirate', 'Bogey Bookie'],
-    fallback: 'Crypto Bro',
+    pool: ['Crypto Bro', 'Handicap Hustler', 'Handicap Parking', 'Net Par Party', 'Scorecard Forger', 'Popsie Plus Pirate', 'Bogey Man'],
+    fallback: 'Handicap Parking',
   },
   chaos: {
-    pool: ['Loose Wire', 'Shank Alert', 'Double Bogey Factory', 'Cart Path Chaos', 'Hazard Magnet', 'OB Explosion', 'Tee Box Tornado', 'Fairway Car Crash'],
+    pool: ['Loose Wire', 'Christopher Columbus', 'Little Richard', 'Captain Hook', 'Tsar Bomba', 'My Husband Golfs too', 'Shank Alert', 'Best Double Bogey Putter', 'Cart Path Union Worker', 'Hazardous Material', 'OB Wan Kenobi', 'Footwege Frank'],
     fallback: 'Loose Wire',
   },
   damage: {
-    pool: ['Snowman', 'Put Me Down for a 5', 'Tin Cup', 'Three-Putt Invoice', 'Penalty Stroke Bill', 'Bunker Disaster', 'Double-Crossed Scorecard', 'Cart-Wreck Estimate'],
-    fallback: 'Snowman',
+    pool: ['Frosty the Snowman', 'Scuba Gear', 'How\'s My Driving? Call 1-800-FUCK-OFF', 'Purse Clutcher', 'Put Me Down for a 5', 'Tsar Bomba', 'Tin Cup', 'She has Caddie Issues', 'Bunker Buster', 'Shanks Fornuttin'],
+    fallback: 'Frosty the Snowman',
   },
   caged: {
-    pool: ['Tin Cup', 'Birdie Curfew', 'Par Handbrake', 'Safety Golf Warden', 'Speed Limit Marshal', 'Neutral Gear Caddie', 'Cruise Control Committee', 'Bogey Chaperone'],
+    pool: ['Tin Cup', 'Meatloaf', 'Penile Detention Center', 'Safety Golf Warden', 'Department of Golf Efficiency', 'Highway Patrol'],
     fallback: 'Tin Cup',
   },
   partTime: {
-    pool: ['Witness Protection', 'Pop-In Episode', 'Tee Time Ghost', 'Guest List Entry', 'Vanishing Tee Sheet', 'Day Pass Phantom', 'Surprise Appearance', 'Calendar Conflict'],
+    pool: ['Witness Protection', 'Daisy (Some Dasiys Here, Some Days He\'s Not)', 'Cameo Appearance', 'Fairweather Fan', 'Ball and Chain', 'Tee Time Ghost', 'Guest List', 'Day Pass', 'Surprise Appearance', 'Calendar Conflict'],
     fallback: 'Witness Protection',
   },
   steady: {
-    pool: ['Meatloaf', 'Accountant', 'Roomba', 'Quiet Money', 'Payroll Pars', 'Lunch Pail Golfer', 'Card Cubicle', 'Fairway Clerk'],
-    fallback: 'Meatloaf',
+    pool: ['Blue Collar Golfer', 'Steady Eddy', 'Cool As a Cucumber', 'Quiet Money', 'Surgeon', 'Tattoo Artist', 'Bomb Squad'],
+    fallback: 'Blue Collar Golfer',
   },
 };
+
+const NICKNAME_POOL_SIGNATURE = JSON.stringify(NICKNAME_PARTS);
+
+function computeProfileMetricsSummary(playerRounds: PlayerRoundEntry[], courseConfig: CourseConfig | null): ProfileMetricsSummary | null {
+  if (!playerRounds.length) return null;
+
+  let totalBirdies = 0;
+  let totalPars = 0;
+  let totalBogeys = 0;
+  let totalDoubleBogeys = 0;
+  let totalTripleBogeys = 0;
+  let totalOther = 0;
+  let totalTrackedHoles = 0;
+  let eventWins = 0;
+  let topThree = 0;
+  let cleanCards = 0;
+  let bounceBackSuccess = 0;
+  let bounceBackChances = 0;
+  let clutchDiffTotal = 0;
+  let clutchHoleCount = 0;
+  const netParDiffs: number[] = [];
+
+  for (const { ev, data } of playerRounds) {
+    if (!data) continue;
+
+    const activePlayers = ev.players.filter((player) => !player.didNotPlay);
+    const maxPoints = activePlayers.reduce((max, player) => Math.max(max, player.points), Number.NEGATIVE_INFINITY);
+    const pointsRank = activePlayers.filter((player) => player.points > data.points).length + 1;
+    if (data.points === maxPoints) eventWins += 1;
+    if (pointsRank <= 3) topThree += 1;
+
+    let eagles = 0;
+    let birdies = data.birdies;
+    let pars = data.pars;
+    let bogeys = data.bogeys;
+    let doubleBogeys = data.doubleBogeys;
+    let tripleBogeys = data.tripleBogeys;
+    let other = data.other;
+
+    if (courseConfig) {
+      const parsForNine = getParsForNine(courseConfig, ev.nineHoles ?? 'front');
+      const bd = computeBreakdown(data.holes, parsForNine);
+      eagles = bd.eagles;
+      birdies = bd.birdies;
+      pars = bd.pars;
+      bogeys = bd.bogeys;
+      doubleBogeys = bd.doubleBogeys;
+      tripleBogeys = bd.tripleBogeys;
+      other = bd.other;
+
+      const totalPar = parsForNine.reduce((sum, par) => sum + par, 0);
+      if (data.netScore !== null) {
+        netParDiffs.push(totalPar - data.netScore);
+      }
+
+      const diffs = data.holes.map((score, index) => score === null ? null : score - parsForNine[index]);
+      let hasDoublePlus = false;
+      diffs.forEach((diff, index) => {
+        if (diff === null) return;
+        if (index >= Math.max(0, diffs.length - 3)) {
+          clutchDiffTotal += diff;
+          clutchHoleCount += 1;
+        }
+        if (diff >= 2) hasDoublePlus = true;
+      });
+      for (let index = 0; index < diffs.length - 1; index += 1) {
+        const currentDiff = diffs[index];
+        const nextDiff = diffs[index + 1];
+        if (currentDiff === null || nextDiff === null || currentDiff < 1) continue;
+        bounceBackChances += 1;
+        if (nextDiff <= 0) bounceBackSuccess += 1;
+      }
+      if (!hasDoublePlus) cleanCards += 1;
+    } else if (doubleBogeys + tripleBogeys + other === 0) {
+      cleanCards += 1;
+    }
+
+    totalBirdies += birdies;
+    totalPars += pars;
+    totalBogeys += bogeys;
+    totalDoubleBogeys += doubleBogeys;
+    totalTripleBogeys += tripleBogeys;
+    totalOther += other;
+    totalTrackedHoles += eagles + birdies + pars + bogeys + doubleBogeys + tripleBogeys + other;
+  }
+
+  const bogeysOrWorse = totalBogeys + totalDoubleBogeys + totalTripleBogeys + totalOther;
+  const weightedPenalty = (totalBogeys * 1) + (totalDoubleBogeys * 2) + (totalTripleBogeys * 3) + (totalOther * 4);
+  const damageControl = totalTrackedHoles > 0 ? (1 - (weightedPenalty / (totalTrackedHoles * 4))) * 100 : null;
+  const blowupAvoidance = totalTrackedHoles > 0 ? (1 - ((totalDoubleBogeys + totalTripleBogeys + totalOther) / totalTrackedHoles)) * 100 : null;
+  const birdieRate = totalTrackedHoles > 0 ? (totalBirdies / totalTrackedHoles) * 100 : null;
+  const parRate = totalTrackedHoles > 0 ? (totalPars / totalTrackedHoles) * 100 : null;
+  const bounceBackRate = bounceBackChances > 0 ? (bounceBackSuccess / bounceBackChances) * 100 : null;
+  const clutchPerformance = clutchHoleCount > 0 ? clutchDiffTotal / clutchHoleCount : null;
+  const handicapOutperformance = netParDiffs.length ? avg(netParDiffs) : null;
+
+  return {
+    eventWins,
+    topThree,
+    cleanCards,
+    birdieRate,
+    parRate,
+    damageControl,
+    blowupAvoidance,
+    bounceBackRate,
+    bounceBackSuccess,
+    bounceBackChances,
+    clutchPerformance,
+    handicapOutperformance,
+    bogeysOrWorse,
+    totalTrackedHoles,
+  };
+}
 
 function buildNicknameProfile(playerName: string, events: EventData[], courseConfig: CourseConfig | null): NicknameProfile | null {
   const playerRounds = events
@@ -291,15 +496,15 @@ function buildNicknameProfile(playerName: string, events: EventData[], courseCon
   };
 }
 
-function StatCard({ label, value, sub, trend }: {
-  label: string; value: string | number; sub?: string; trend?: 'up' | 'down' | 'flat';
+function StatCard({ label, value, sub, trend, deltaLabel, deltaClassName }: {
+  label: string; value: React.ReactNode; sub?: string; trend?: 'up' | 'down' | 'flat'; deltaLabel?: string; deltaClassName?: string;
 }) {
   const Icon = trend === 'up' ? TrendingUp : trend === 'down' ? TrendingDown : Minus;
   const trendColor = trend === 'up' ? '#22c55e' : trend === 'down' ? '#ef4444' : '#888';
   return (
     <div className="pp-stat-card">
       <span className="pp-stat-label">{label}</span>
-      <span className="pp-stat-value">{value}</span>
+      <span className="pp-stat-value">{value}{deltaLabel ? <span className={deltaClassName}>{deltaLabel}</span> : null}</span>
       {sub && <span className="pp-stat-sub">{sub}</span>}
       {trend && <Icon size={14} style={{ color: trendColor, marginTop: 4 }} />}
     </div>
@@ -311,12 +516,45 @@ const SCORE_COLORS: Record<string, string> = {
   Bogeys: '#f97316', 'Dbl Bogeys': '#ef4444', 'Trpl+': '#7c3aed', 'Other': '#3f3f5a',
 };
 
+const METRIC_LABELS: Record<AnalysisMetricKey, string> = {
+  pointsForm: 'Points Form',
+  netScoring: 'Net Scoring',
+  grossScoring: 'Gross Scoring',
+  consistency: 'Consistency',
+  birdieRate: 'Birdie Rate',
+  damageControl: 'Damage Control',
+  blowupAvoidance: 'Blow-Up Avoidance',
+  participation: 'Participation',
+  parEfficiency: 'Par Efficiency',
+  eventWins: 'Event Wins',
+  topThreeRate: 'Top-3 Finishes',
+  topFiveRate: 'Top-5 Finishes',
+  clutchPerformance: 'Clutch Holes',
+  bounceBack: 'Bounce-Back',
+  cleanCard: 'Clean Cards',
+  ceilingFloor: 'Ceiling vs Floor',
+  handicapOutperformance: 'Handicap Outperformance',
+  momentum: 'Momentum',
+  clutchFactor: 'Clutch Factor',
+};
+
 // ── Main component ────────────────────────────────────────────────────────────
 export default function PlayerProfileModal({
-  playerName, events, courseConfig, handicapMode, adjustedScoring, onHoleClick, onClose,
+  playerName, events, courseConfig, yardageBandSettings, handicapMode, analysisSettings, adjustedScoring, onHoleClick, onClose,
 }: PlayerProfileModalProps) {
+  const [showRankExplain, setShowRankExplain] = useState(false);
   const color = getPlayerColor(playerName);
   const c = useChartColors();
+  const readableAxisStroke = 'var(--text2)';
+  const readableAxisTick = { fill: 'var(--text2)', fontSize: 11, fontWeight: 600 as const };
+  const readableTooltipStyle = {
+    background: 'var(--bg2)',
+    border: '1px solid var(--border)',
+    borderRadius: 8,
+    color: 'var(--text)',
+  };
+  const readableTooltipLabelStyle = { color: 'var(--text)', fontWeight: 700 };
+  const readableTooltipItemStyle = { color: 'var(--text)' };
   const handicapLabel = handicapMode === 'front-back' ? 'Side H\'cap' : 'H\'cap';
   const handicapLongLabel = handicapMode === 'front-back' ? 'Side Handicap' : 'Handicap';
   const adjustedMode = adjustedScoring?.mode ?? 'none';
@@ -324,14 +562,18 @@ export default function PlayerProfileModal({
   const sortedEvents = useMemo(() =>
     [...events].sort((a, b) => a.eventNumber - b.eventNumber), [events]);
 
-  // All event data for this player, in order
-  const playerRounds = useMemo(() =>
+  const allPlayerEvents = useMemo(() =>
     sortedEvents.map(ev => ({
       ev,
       data: ev.players.find(p => p.playerName === playerName) ?? null,
       standing: ev.standings.find(s => s.playerName === playerName) ?? null,
-    })).filter(r => r.data && !r.data.didNotPlay),
+    })),
     [sortedEvents, playerName]);
+
+  // All event data for this player, in order
+  const playerRounds = useMemo(() =>
+    allPlayerEvents.filter(r => r.data && !r.data.didNotPlay),
+    [allPlayerEvents]);
 
   // Current standing from the latest event
   const latestStanding = useMemo(() => {
@@ -392,116 +634,97 @@ export default function PlayerProfileModal({
     };
   }, [playerRounds, sortedEvents]);
 
-  const profileMetrics = useMemo(() => {
-    if (!playerRounds.length) return null;
+  const profileMetrics = useMemo(() => computeProfileMetricsSummary(playerRounds, courseConfig), [courseConfig, playerRounds]);
 
-    let totalBirdies = 0;
-    let totalPars = 0;
-    let totalBogeys = 0;
-    let totalDoubleBogeys = 0;
-    let totalTripleBogeys = 0;
-    let totalOther = 0;
-    let totalTrackedHoles = 0;
-    let eventWins = 0;
-    let topThree = 0;
-    let cleanCards = 0;
-    let bounceBackSuccess = 0;
-    let bounceBackChances = 0;
-    let clutchDiffTotal = 0;
-    let clutchHoleCount = 0;
-    const netParDiffs: number[] = [];
+  const previousProfileMetrics = useMemo(() => {
+    if (allPlayerEvents.length < 2) return null;
+    const previousEventRounds = allPlayerEvents
+      .slice(0, -1)
+      .filter((round) => round.data && !round.data.didNotPlay);
+    return previousEventRounds.length ? computeProfileMetricsSummary(previousEventRounds, courseConfig) : null;
+  }, [allPlayerEvents, courseConfig]);
 
-    for (const { ev, data } of playerRounds) {
-      if (!data) continue;
+  const sharedAnalysis = useMemo(
+    () => buildLeagueAnalysisRanking(sortedEvents, courseConfig, analysisSettings),
+    [analysisSettings, courseConfig, sortedEvents],
+  );
 
-      const activePlayers = ev.players.filter((player) => !player.didNotPlay);
-      const maxPoints = activePlayers.reduce((max, player) => Math.max(max, player.points), Number.NEGATIVE_INFINITY);
-      const pointsRank = activePlayers.filter((player) => player.points > data.points).length + 1;
-      if (data.points === maxPoints) eventWins += 1;
-      if (pointsRank <= 3) topThree += 1;
+  const previousSharedAnalysis = useMemo(
+    () => (sortedEvents.length > 1 ? buildLeagueAnalysisRanking(sortedEvents.slice(0, -1), courseConfig, analysisSettings) : null),
+    [analysisSettings, courseConfig, sortedEvents],
+  );
 
-      let eagles = 0;
-      let birdies = data.birdies;
-      let pars = data.pars;
-      let bogeys = data.bogeys;
-      let doubleBogeys = data.doubleBogeys;
-      let tripleBogeys = data.tripleBogeys;
-      let other = data.other;
+  const playerStarRating = useMemo(() => {
+    const entry = sharedAnalysis.ranking.find((row) => row.name === playerName);
+    if (!entry) return null;
 
-      if (courseConfig) {
-        const parsForNine = getParsForNine(courseConfig, ev.nineHoles ?? 'front');
-        const bd = computeBreakdown(data.holes, parsForNine);
-        eagles = bd.eagles;
-        birdies = bd.birdies;
-        pars = bd.pars;
-        bogeys = bd.bogeys;
-        doubleBogeys = bd.doubleBogeys;
-        tripleBogeys = bd.tripleBogeys;
-        other = bd.other;
-
-        const totalPar = parsForNine.reduce((sum, par) => sum + par, 0);
-        if (data.netScore !== null) {
-          netParDiffs.push(totalPar - data.netScore);
-        }
-
-        const diffs = data.holes.map((score, index) => score === null ? null : score - parsForNine[index]);
-        let hasDoublePlus = false;
-        diffs.forEach((diff, index) => {
-          if (diff === null) return;
-          if (index >= Math.max(0, diffs.length - 3)) {
-            clutchDiffTotal += diff;
-            clutchHoleCount += 1;
-          }
-          if (diff >= 2) hasDoublePlus = true;
-        });
-        for (let index = 0; index < diffs.length - 1; index += 1) {
-          const currentDiff = diffs[index];
-          const nextDiff = diffs[index + 1];
-          if (currentDiff === null || nextDiff === null || currentDiff < 1) continue;
-          bounceBackChances += 1;
-          if (nextDiff <= 0) bounceBackSuccess += 1;
-        }
-        if (!hasDoublePlus) cleanCards += 1;
-      } else if (doubleBogeys + tripleBogeys + other === 0) {
-        cleanCards += 1;
-      }
-
-      totalBirdies += birdies;
-      totalPars += pars;
-      totalBogeys += bogeys;
-      totalDoubleBogeys += doubleBogeys;
-      totalTripleBogeys += tripleBogeys;
-      totalOther += other;
-      totalTrackedHoles += eagles + birdies + pars + bogeys + doubleBogeys + tripleBogeys + other;
-    }
-
-    const bogeysOrWorse = totalBogeys + totalDoubleBogeys + totalTripleBogeys + totalOther;
-    const weightedPenalty = (totalBogeys * 1) + (totalDoubleBogeys * 2) + (totalTripleBogeys * 3) + (totalOther * 4);
-    const damageControl = totalTrackedHoles > 0 ? (1 - (weightedPenalty / (totalTrackedHoles * 4))) * 100 : null;
-    const blowupAvoidance = totalTrackedHoles > 0 ? (1 - ((totalDoubleBogeys + totalTripleBogeys + totalOther) / totalTrackedHoles)) * 100 : null;
-    const birdieRate = totalTrackedHoles > 0 ? (totalBirdies / totalTrackedHoles) * 100 : null;
-    const parRate = totalTrackedHoles > 0 ? (totalPars / totalTrackedHoles) * 100 : null;
-    const bounceBackRate = bounceBackChances > 0 ? (bounceBackSuccess / bounceBackChances) * 100 : null;
-    const clutchPerformance = clutchHoleCount > 0 ? clutchDiffTotal / clutchHoleCount : null;
-    const handicapOutperformance = netParDiffs.length ? avg(netParDiffs) : null;
+    const formatRank = (rank: { rank: number; total: number } | undefined) => (rank ? `Rank #${rank.rank}/${rank.total}` : 'Rank —');
 
     return {
-      eventWins,
-      topThree,
-      cleanCards,
-      birdieRate,
-      parRate,
-      damageControl,
-      blowupAvoidance,
-      bounceBackRate,
-      bounceBackSuccess,
-      bounceBackChances,
-      clutchPerformance,
-      handicapOutperformance,
-      bogeysOrWorse,
-      totalTrackedHoles,
+      score: entry.overallScore,
+      stars: entry.stars,
+      metricRanks: {
+        starRating: formatRank(sharedAnalysis.overallRankByPlayer[playerName]),
+        eventWins: formatRank(sharedAnalysis.metricRanksByMetricId.eventWins[playerName]),
+        topThree: formatRank(sharedAnalysis.metricRanksByMetricId.topThreeRate[playerName]),
+        cleanCards: formatRank(sharedAnalysis.metricRanksByMetricId.cleanCard[playerName]),
+        birdieRate: formatRank(sharedAnalysis.metricRanksByMetricId.birdieRate[playerName]),
+        parRate: formatRank(sharedAnalysis.metricRanksByMetricId.parEfficiency[playerName]),
+        damageControl: formatRank(sharedAnalysis.metricRanksByMetricId.damageControl[playerName]),
+        blowupAvoidance: formatRank(sharedAnalysis.metricRanksByMetricId.blowupAvoidance[playerName]),
+        bounceBack: formatRank(sharedAnalysis.metricRanksByMetricId.bounceBack[playerName]),
+        clutchPerformance: formatRank(sharedAnalysis.metricRanksByMetricId.clutchPerformance[playerName]),
+        handicapOutperformance: formatRank(sharedAnalysis.metricRanksByMetricId.handicapOutperformance[playerName]),
+      },
     };
-  }, [courseConfig, playerRounds]);
+  }, [playerName, sharedAnalysis]);
+
+  const rankExplainData = useMemo(() => {
+    const entry = sharedAnalysis.ranking.find((row) => row.name === playerName);
+    if (!entry) return null;
+
+    const previousEntry = previousSharedAnalysis?.ranking.find((row) => row.name === playerName);
+    const metricIds = Object.keys(entry.metricScores) as AnalysisMetricKey[];
+    const contributions = metricIds.map((metricId) => {
+      const score = Number(entry.metricScores[metricId] ?? 0);
+      const weight = Number(analysisSettings.weights[metricId] ?? 0);
+      const weightedContribution = score * weight;
+      const previousScore = previousEntry ? Number(previousEntry.metricScores[metricId] ?? 0) : null;
+      return {
+        metricId,
+        label: METRIC_LABELS[metricId],
+        score,
+        weight,
+        weightedContribution,
+        deltaFromPrevious: previousScore === null ? null : score - previousScore,
+      };
+    });
+
+    const strongestDrivers = [...contributions].sort((a, b) => b.weightedContribution - a.weightedContribution).slice(0, 3);
+    const weakestDrivers = [...contributions].sort((a, b) => a.weightedContribution - b.weightedContribution).slice(0, 3);
+
+    const supportingEvents = allPlayerEvents
+      .filter((round) => round.data && !round.data.didNotPlay)
+      .slice(-5)
+      .reverse()
+      .map(({ ev, data }) => ({
+        eventLabel: getEventDisplayName(ev),
+        eventDate: formatEventDateDisplay(ev.eventDate) || '—',
+        points: data?.points ?? null,
+        net: data?.netScore ?? null,
+        gross: data?.grossScore ?? null,
+      }));
+
+    const overallRank = sharedAnalysis.overallRankByPlayer[playerName];
+    return {
+      entry,
+      overallRank,
+      contributions,
+      strongestDrivers,
+      weakestDrivers,
+      supportingEvents,
+    };
+  }, [allPlayerEvents, analysisSettings.weights, playerName, previousSharedAnalysis, sharedAnalysis]);
 
   const uniqueNicknames = useMemo(() => {
     const allPlayers = Array.from(new Set(sortedEvents.flatMap((event) => event.players.map((player) => player.playerName))));
@@ -532,7 +755,7 @@ export default function PlayerProfileModal({
     }
 
     return map;
-  }, [courseConfig, sortedEvents]);
+  }, [courseConfig, sortedEvents, NICKNAME_POOL_SIGNATURE]);
 
   const playerSummary = useMemo(() => {
     if (!stats || !profileMetrics) return null;
@@ -876,21 +1099,22 @@ export default function PlayerProfileModal({
 
   // ── Per-event chart data ───────────────────────────────────────────────────
   const eventChartData = useMemo(() =>
-    playerRounds.map(({ ev, data, standing }) => ({
+    allPlayerEvents.map(({ ev, data, standing }) => ({
       label: `E${ev.eventNumber}`,
       date: ev.eventDate,
       dropped: droppedEventIds.has(ev.id),
+      dnp: !data || data.didNotPlay,
       side: ev.nineHoles === 'back' ? 'Back' : 'Front',
       gross: data?.grossScore ?? null,
       net: data?.netScore ?? null,
-      points: data?.points ?? 0,
+      points: !data || data.didNotPlay ? null : data.points,
       handicap: data?.handicap ?? null,
       frontHandicap: ev.nineHoles === 'back' ? null : (data?.handicap ?? null),
       backHandicap: ev.nineHoles === 'back' ? (data?.handicap ?? null) : null,
       position: standing?.position ?? null,
       cumulativePoints: standing?.cumulativePoints ?? 0,
     })),
-    [droppedEventIds, playerRounds]);
+    [allPlayerEvents, droppedEventIds]);
 
   // ── Per-hole stats for this player vs field ──────────────────────────────
   const perHoleStats = useMemo(() => {
@@ -906,6 +1130,9 @@ export default function PlayerProfileModal({
       const holes = Array.from({ length: 9 }, (_, slotIdx) => {
         const holeNum = startHole + slotIdx;
         const par = pars[slotIdx];
+        const holeMeta = courseConfig.holes[holeNum - 1];
+        const yardage = holeMeta?.yardage ?? null;
+        const strokeIndex = holeMeta?.strokeIndex ?? null;
 
         // This player's scores on this hole
         const playerScores: number[] = [];
@@ -946,10 +1173,14 @@ export default function PlayerProfileModal({
           holeNum,
           label: `H${holeNum}`,
           par,
+          yardage,
+          strokeIndex,
           playerAvg: pAvg !== null ? Math.round(pAvg * 100) / 100 : null,
           fieldAvg:  fAvg !== null ? Math.round(fAvg * 100) / 100 : null,
           playerVsPar: pAvg !== null ? Math.round((pAvg - par) * 100) / 100 : null,
           fieldVsPar:  fAvg !== null ? Math.round((fAvg - par) * 100) / 100 : null,
+          playerYardsPerStroke: yardage !== null && pAvg !== null && pAvg > 0 ? yardage / pAvg : null,
+          fieldYardsPerStroke: yardage !== null && fAvg !== null && fAvg > 0 ? yardage / fAvg : null,
           advantage: pAvg !== null && fAvg !== null ? Math.round((pAvg - fAvg) * 100) / 100 : null,
           rounds: playerScores.length,
           best:  playerScores.length ? Math.min(...playerScores) : null,
@@ -963,6 +1194,156 @@ export default function PlayerProfileModal({
     }).filter(Boolean);
   }, [courseConfig, sortedEvents, playerName]);
 
+  const yardageInsights = useMemo(() => {
+    if (!courseConfig || !playerRounds.length) return null;
+
+    type Aggregate = {
+      holes: number;
+      holeNumbers: Set<number>;
+      diffTotal: number;
+      eagles: number;
+      birdies: number;
+      pars: number;
+      bogeys: number;
+      doubleBogeys: number;
+      triplePlus: number;
+      yardsTotal: number;
+      strokesTotal: number;
+    };
+
+    const createAggregate = (): Aggregate => ({
+      holes: 0,
+      holeNumbers: new Set<number>(),
+      diffTotal: 0,
+      eagles: 0,
+      birdies: 0,
+      pars: 0,
+      bogeys: 0,
+      doubleBogeys: 0,
+      triplePlus: 0,
+      yardsTotal: 0,
+      strokesTotal: 0,
+    });
+
+    const playerAggregates: Record<YardageBandKey, Aggregate> = {
+      short: createAggregate(),
+      mid: createAggregate(),
+      long: createAggregate(),
+      xlong: createAggregate(),
+    };
+    const fieldAggregates: Record<YardageBandKey, Aggregate> = {
+      short: createAggregate(),
+      mid: createAggregate(),
+      long: createAggregate(),
+      xlong: createAggregate(),
+    };
+
+    let hasAnyYardage = false;
+
+    for (const { ev, data } of playerRounds) {
+      if (!data) continue;
+      const startIndex = ev.nineHoles === 'back' ? 9 : 0;
+      const holesMeta = courseConfig.holes.slice(startIndex, startIndex + 9);
+      const pars = getParsForNine(courseConfig, ev.nineHoles ?? 'front');
+
+      for (let holeIndex = 0; holeIndex < 9; holeIndex += 1) {
+        const yardage = holesMeta[holeIndex]?.yardage;
+        if (yardage === null || yardage === undefined) continue;
+
+        hasAnyYardage = true;
+        const holeNumber = startIndex + holeIndex + 1;
+        const par = pars[holeIndex];
+        const bandKey = getYardageBandKey(yardage, par, yardageBandSettings);
+
+        const playerScore = data.holes[holeIndex];
+        if (playerScore !== null && playerScore !== undefined) {
+          const diff = playerScore - par;
+          const bucket = playerAggregates[bandKey];
+          bucket.holes += 1;
+          bucket.holeNumbers.add(holeNumber);
+          bucket.diffTotal += diff;
+          if (diff <= -2) bucket.eagles += 1;
+          else if (diff === -1) bucket.birdies += 1;
+          else if (diff === 0) bucket.pars += 1;
+          else if (diff === 1) bucket.bogeys += 1;
+          else if (diff === 2) bucket.doubleBogeys += 1;
+          else bucket.triplePlus += 1;
+          bucket.yardsTotal += yardage;
+          bucket.strokesTotal += playerScore;
+        }
+
+        for (const player of ev.players) {
+          if (player.didNotPlay) continue;
+          const score = player.holes[holeIndex];
+          if (score === null || score === undefined) continue;
+          const diff = score - par;
+          const bucket = fieldAggregates[bandKey];
+          bucket.holes += 1;
+          bucket.holeNumbers.add(holeNumber);
+          bucket.diffTotal += diff;
+          if (diff <= -2) bucket.eagles += 1;
+          else if (diff === -1) bucket.birdies += 1;
+          else if (diff === 0) bucket.pars += 1;
+          else if (diff === 1) bucket.bogeys += 1;
+          else if (diff === 2) bucket.doubleBogeys += 1;
+          else bucket.triplePlus += 1;
+          bucket.yardsTotal += yardage;
+          bucket.strokesTotal += score;
+        }
+      }
+    }
+
+    if (!hasAnyYardage) return null;
+
+    const rows: YardageBandRow[] = YARDAGE_BANDS.map((band) => {
+      const player = playerAggregates[band.key];
+      const field = fieldAggregates[band.key];
+      return {
+        key: band.key,
+        label: `${band.label} (${getYardageBandDescription(band.key, yardageBandSettings)})`,
+        playerHoles: player.holes,
+        holeNumbers: Array.from(player.holeNumbers).sort((a, b) => a - b),
+        playerAvgVsPar: player.holes > 0 ? player.diffTotal / player.holes : null,
+        fieldAvgVsPar: field.holes > 0 ? field.diffTotal / field.holes : null,
+        playerEagleCount: player.eagles,
+        playerEagleRate: player.holes > 0 ? (player.eagles / player.holes) * 100 : null,
+        playerBirdieCount: player.birdies,
+        playerBirdieRate: player.holes > 0 ? (player.birdies / player.holes) * 100 : null,
+        playerParCount: player.pars,
+        playerParRate: player.holes > 0 ? (player.pars / player.holes) * 100 : null,
+        playerBogeyCount: player.bogeys,
+        playerBogeyRate: player.holes > 0 ? (player.bogeys / player.holes) * 100 : null,
+        playerDoubleBogeyCount: player.doubleBogeys,
+        playerDoubleBogeyRate: player.holes > 0 ? (player.doubleBogeys / player.holes) * 100 : null,
+        playerTriplePlusCount: player.triplePlus,
+        playerTriplePlusRate: player.holes > 0 ? (player.triplePlus / player.holes) * 100 : null,
+        playerYardsPerStroke: player.strokesTotal > 0 ? player.yardsTotal / player.strokesTotal : null,
+        fieldYardsPerStroke: field.strokesTotal > 0 ? field.yardsTotal / field.strokesTotal : null,
+      };
+    }).filter((row) => row.playerHoles > 0 || row.fieldAvgVsPar !== null);
+
+    if (!rows.length) return null;
+
+    const scoredRows = rows.filter((row) => row.playerAvgVsPar !== null);
+    const bestRow = scoredRows.length
+      ? scoredRows.reduce((best, row) => (row.playerAvgVsPar! < best.playerAvgVsPar! ? row : best))
+      : null;
+    const toughestRow = scoredRows.length
+      ? scoredRows.reduce((worst, row) => (row.playerAvgVsPar! > worst.playerAvgVsPar! ? row : worst))
+      : null;
+    const efficientRows = rows.filter((row) => row.playerYardsPerStroke !== null);
+    const bestEfficiencyRow = efficientRows.length
+      ? efficientRows.reduce((best, row) => (row.playerYardsPerStroke! > best.playerYardsPerStroke! ? row : best))
+      : null;
+
+    return {
+      rows,
+      bestRow,
+      toughestRow,
+      bestEfficiencyRow,
+    };
+  }, [courseConfig, playerRounds, yardageBandSettings]);
+
   // ── Hole-by-hole scorecard table ──────────────────────────────────────────
   const roundScorecardGroups = useMemo(() => {
     const groups = [
@@ -970,13 +1351,13 @@ export default function PlayerProfileModal({
         nine: 'front' as const,
         label: 'Front 9',
         startHole: 1,
-        rounds: playerRounds.filter(({ ev }) => ev.nineHoles !== 'back'),
+        rounds: allPlayerEvents.filter(({ ev }) => ev.nineHoles !== 'back'),
       },
       {
         nine: 'back' as const,
         label: 'Back 9',
         startHole: 10,
-        rounds: playerRounds.filter(({ ev }) => ev.nineHoles === 'back'),
+        rounds: allPlayerEvents.filter(({ ev }) => ev.nineHoles === 'back'),
       },
     ];
 
@@ -986,7 +1367,7 @@ export default function PlayerProfileModal({
         holeHeaders: Array.from({ length: 9 }, (_, index) => group.startHole + index),
       }))
       .filter((group) => group.rounds.length > 0);
-  }, [playerRounds]);
+  }, [allPlayerEvents]);
 
   // ── Radar data (scoring profile vs averages) ──────────────────────────────
   const radarData = useMemo(() => {
@@ -1046,6 +1427,220 @@ export default function PlayerProfileModal({
             </div>
           )}
 
+          {profileMetrics && (
+            <>
+              <div className="pp-section-title" style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 10 }}>
+                <span>Player Metrics</span>
+                {rankExplainData && (
+                  <button className="btn-secondary" onClick={() => setShowRankExplain(true)} style={{ padding: '5px 10px', fontSize: 12 }}>
+                    Explain Rank
+                  </button>
+                )}
+              </div>
+              <div className="pp-stats-row">
+                {playerStarRating && (
+                  <StatCard
+                    label="Star Rating"
+                    value={<span className="pp-star-value">{renderStarRating(playerStarRating.stars)}</span>}
+                    sub={`${playerStarRating.stars.toFixed(1)} / 5 · ${playerStarRating.metricRanks.starRating}`}
+                  />
+                )}
+                <StatCard label="Event Wins" value={profileMetrics.eventWins} sub={playerStarRating?.metricRanks.eventWins} {...formatMetricDelta(previousProfileMetrics ? profileMetrics.eventWins - previousProfileMetrics.eventWins : null)} />
+                <StatCard label="Top-3 Finishes" value={profileMetrics.topThree} sub={playerStarRating?.metricRanks.topThree} {...formatMetricDelta(previousProfileMetrics ? profileMetrics.topThree - previousProfileMetrics.topThree : null)} />
+                <StatCard label="Clean Cards" value={profileMetrics.cleanCards} sub={playerStarRating?.metricRanks.cleanCards} {...formatMetricDelta(previousProfileMetrics ? profileMetrics.cleanCards - previousProfileMetrics.cleanCards : null)} />
+                <StatCard label="Birdie Rate" value={profileMetrics.birdieRate !== null ? `${profileMetrics.birdieRate.toFixed(1)}%` : '—'} sub={playerStarRating?.metricRanks.birdieRate} {...formatMetricDelta(previousProfileMetrics && profileMetrics.birdieRate !== null && previousProfileMetrics.birdieRate !== null ? profileMetrics.birdieRate - previousProfileMetrics.birdieRate : null)} />
+                <StatCard label="Par Rate" value={profileMetrics.parRate !== null ? `${profileMetrics.parRate.toFixed(1)}%` : '—'} sub={playerStarRating?.metricRanks.parRate} {...formatMetricDelta(previousProfileMetrics && profileMetrics.parRate !== null && previousProfileMetrics.parRate !== null ? profileMetrics.parRate - previousProfileMetrics.parRate : null)} />
+                <StatCard label="Damage Control" value={profileMetrics.damageControl !== null ? `${profileMetrics.damageControl.toFixed(0)}` : '—'} sub={playerStarRating?.metricRanks.damageControl} {...formatMetricDelta(previousProfileMetrics && profileMetrics.damageControl !== null && previousProfileMetrics.damageControl !== null ? profileMetrics.damageControl - previousProfileMetrics.damageControl : null)} />
+                <StatCard label="Blow-Up Avoidance" value={profileMetrics.blowupAvoidance !== null ? `${profileMetrics.blowupAvoidance.toFixed(0)}` : '—'} sub={playerStarRating?.metricRanks.blowupAvoidance} {...formatMetricDelta(previousProfileMetrics && profileMetrics.blowupAvoidance !== null && previousProfileMetrics.blowupAvoidance !== null ? profileMetrics.blowupAvoidance - previousProfileMetrics.blowupAvoidance : null)} />
+                <StatCard label="Bounce-Back" value={profileMetrics.bounceBackRate !== null ? `${profileMetrics.bounceBackRate.toFixed(1)}%` : '—'} sub={`${profileMetrics.bounceBackChances > 0 ? `${profileMetrics.bounceBackSuccess}/${profileMetrics.bounceBackChances}` : 'No chances'}${playerStarRating ? ` · ${playerStarRating.metricRanks.bounceBack}` : ''}`} {...formatMetricDelta(previousProfileMetrics && profileMetrics.bounceBackRate !== null && previousProfileMetrics.bounceBackRate !== null ? profileMetrics.bounceBackRate - previousProfileMetrics.bounceBackRate : null)} />
+                <StatCard label="Clutch Holes" value={profileMetrics.clutchPerformance !== null ? formatSigned(profileMetrics.clutchPerformance, 2) : '—'} sub={`Final 3 holes vs par${playerStarRating ? ` · ${playerStarRating.metricRanks.clutchPerformance}` : ''}`} {...formatMetricDelta(previousProfileMetrics && profileMetrics.clutchPerformance !== null && previousProfileMetrics.clutchPerformance !== null ? profileMetrics.clutchPerformance - previousProfileMetrics.clutchPerformance : null)} />
+                <StatCard label="Handicap Outperformance" value={profileMetrics.handicapOutperformance !== null ? formatSigned(profileMetrics.handicapOutperformance, 2) : '—'} sub={`vs net par${playerStarRating ? ` · ${playerStarRating.metricRanks.handicapOutperformance}` : ''}`} {...formatMetricDelta(previousProfileMetrics && profileMetrics.handicapOutperformance !== null && previousProfileMetrics.handicapOutperformance !== null ? profileMetrics.handicapOutperformance - previousProfileMetrics.handicapOutperformance : null)} />
+              </div>
+            </>
+          )}
+
+          {showRankExplain && rankExplainData && (
+            <div className="modal-overlay" onClick={() => setShowRankExplain(false)}>
+              <div className="modal modal-explain-rank" onClick={(e) => e.stopPropagation()}>
+                <div className="modal-header">
+                  <h2>{playerName} - Explain Rank</h2>
+                  <button className="icon-btn" onClick={() => setShowRankExplain(false)}>Close</button>
+                </div>
+                <div className="modal-body" style={{ display: 'grid', gap: 12 }}>
+                  <div className="compare-radar-card" style={{ margin: 0 }}>
+                    <div style={{ color: 'var(--text)', fontWeight: 700, marginBottom: 6 }}>
+                      Overall: {rankExplainData.entry.overallScore.toFixed(1)} score, {rankExplainData.entry.stars.toFixed(1)} stars
+                      {rankExplainData.overallRank ? `, rank #${rankExplainData.overallRank.rank}/${rankExplainData.overallRank.total}` : ''}
+                    </div>
+                    <div style={{ color: 'var(--text2)', fontSize: 12, lineHeight: 1.5 }}>
+                      Composite formula: sum(metric score x metric weight) / sum(metric weights)
+                    </div>
+                  </div>
+
+                  <div className="compare-selected-grid" style={{ margin: 0 }}>
+                    <div className="compare-profile-card" style={{ margin: 0 }}>
+                      <div className="compare-profile-name" style={{ marginBottom: 8 }}>Top Positive Drivers</div>
+                      {rankExplainData.strongestDrivers.map((driver) => (
+                        <div key={`driver-plus-${driver.metricId}`} className="compare-metric-line">
+                          <span>{driver.label}</span>
+                          <strong>{driver.weightedContribution.toFixed(1)}</strong>
+                        </div>
+                      ))}
+                    </div>
+                    <div className="compare-profile-card" style={{ margin: 0 }}>
+                      <div className="compare-profile-name" style={{ marginBottom: 8 }}>Lowest Contributors</div>
+                      {rankExplainData.weakestDrivers.map((driver) => (
+                        <div key={`driver-minus-${driver.metricId}`} className="compare-metric-line">
+                          <span>{driver.label}</span>
+                          <strong>{driver.weightedContribution.toFixed(1)}</strong>
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+
+                  <div className="compare-summary-table-wrap" style={{ marginTop: 0 }}>
+                    <table className="compare-summary-table">
+                      <thead>
+                        <tr>
+                          <th>Metric</th>
+                          <th>Score</th>
+                          <th>Weight</th>
+                          <th>Weighted Contribution</th>
+                          <th>Delta vs Previous Scope</th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {[...rankExplainData.contributions]
+                          .sort((a, b) => b.weightedContribution - a.weightedContribution)
+                          .map((metric, index) => (
+                            <tr key={`explain-${metric.metricId}`} className={index % 2 === 0 ? 'compare-even' : ''}>
+                              <td>{metric.label}</td>
+                              <td>{metric.score.toFixed(1)}</td>
+                              <td>{(metric.weight * 100).toFixed(0)}%</td>
+                              <td>{metric.weightedContribution.toFixed(1)}</td>
+                              <td>{metric.deltaFromPrevious === null ? '—' : `${metric.deltaFromPrevious >= 0 ? '+' : ''}${metric.deltaFromPrevious.toFixed(1)}`}</td>
+                            </tr>
+                          ))}
+                      </tbody>
+                    </table>
+                  </div>
+
+                  <div className="compare-radar-card" style={{ margin: 0 }}>
+                    <div style={{ color: 'var(--text)', fontWeight: 700, marginBottom: 8 }}>Supporting Events (Most Recent 5)</div>
+                    <div className="compare-summary-table-wrap" style={{ marginTop: 0 }}>
+                      <table className="compare-summary-table">
+                        <thead>
+                          <tr>
+                            <th>Event</th>
+                            <th>Date</th>
+                            <th>Points</th>
+                            <th>Net</th>
+                            <th>Gross</th>
+                          </tr>
+                        </thead>
+                        <tbody>
+                          {rankExplainData.supportingEvents.map((event, index) => (
+                            <tr key={`supporting-event-${event.eventLabel}-${index}`} className={index % 2 === 0 ? 'compare-even' : ''}>
+                              <td>{event.eventLabel}</td>
+                              <td>{event.eventDate}</td>
+                              <td>{event.points ?? '—'}</td>
+                              <td>{event.net ?? '—'}</td>
+                              <td>{event.gross ?? '—'}</td>
+                            </tr>
+                          ))}
+                        </tbody>
+                      </table>
+                    </div>
+                  </div>
+                </div>
+              </div>
+            </div>
+          )}
+
+          {playerRounds.length > 0 && (
+            <>
+              <div className="pp-section-title">Round Scorecards</div>
+              <div className="pp-scorecard-wrap">
+                {roundScorecardGroups.map((group) => (
+                  <div key={group.nine} style={{ marginBottom: 16 }}>
+                    <p className="pp-chart-label" style={{ marginBottom: 8 }}>{group.label}</p>
+                    <table className="pp-scorecard">
+                      <thead>
+                        <tr>
+                          <th className="pp-sc-label">Event</th>
+                          <th className="pp-sc-label">Nine</th>
+                          {group.holeHeaders.map(h => (
+                            <th key={h} className="pp-sc-hole">
+                              {onHoleClick ? (
+                                <button
+                                  className="icon-btn"
+                                  style={{ width: 'auto', height: 'auto', padding: 0, color: 'var(--text)', textDecoration: 'underline' }}
+                                  onClick={() => onHoleClick(h, group.nine)}
+                                  title={`View hole ${h} profile`}
+                                >
+                                  #{h}
+                                </button>
+                              ) : `#${h}`}
+                            </th>
+                          ))}
+                          <th className="pp-sc-total">Gross</th>
+                          <th className="pp-sc-total">Net</th>
+                          <th className="pp-sc-total">Pts</th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {group.rounds.map(({ ev, data }) => {
+                          const isDnp = !data || data.didNotPlay;
+                          const pars = courseConfig ? getParsForNine(courseConfig, ev.nineHoles ?? 'front') : null;
+                          const nineLabel = ev.nineHoles === 'back' ? 'Back 9' : 'Front 9';
+                          const startHole = ev.nineHoles === 'back' ? 10 : 1;
+                          const isDropped = droppedEventIds.has(ev.id);
+                          return (
+                            <tr key={ev.id} className="pp-sc-row" style={isDropped ? { background: 'rgba(148,163,184,0.10)' } : undefined}>
+                              <td className="pp-sc-label">
+                                {getEventDisplayName(ev)}{formatEventDateDisplay(ev.eventDate) ? ` · ${formatEventDateDisplay(ev.eventDate)}` : ''}
+                                {isDropped && (
+                                  <span style={{ marginLeft: 8, fontSize: 11, fontWeight: 700, color: '#94a3b8', textTransform: 'uppercase' }}>Dropped</span>
+                                )}
+                              </td>
+                              <td className="pp-sc-label">{nineLabel}</td>
+                              {(isDnp ? Array.from({ length: 9 }, () => null) : data.holes).map((score, i) => {
+                                const holeNum = startHole + i;
+                                const par = pars ? pars[i] : null;
+                                const diff = score !== null && par !== null ? score - par : null;
+                                const cls = diff === null ? ''
+                                  : diff <= -2 ? 'pp-sc-eagle'
+                                  : diff === -1 ? 'pp-sc-birdie'
+                                  : diff === 0  ? 'pp-sc-par'
+                                  : diff === 1  ? 'pp-sc-bogey'
+                                  : diff === 2  ? 'pp-sc-dbl'
+                                  : 'pp-sc-trpl';
+                                return (
+                                  <td
+                                    key={i}
+                                    className={`pp-sc-hole-cell ${cls}`}
+                                    title={`Hole ${holeNum}${par ? ` · Par ${par}` : ''}`}
+                                    onClick={onHoleClick ? () => onHoleClick(holeNum, ev.nineHoles ?? 'front') : undefined}
+                                    style={onHoleClick ? { cursor: 'pointer' } : undefined}
+                                  >
+                                    {isDnp ? 'DNP' : (score ?? '—')}
+                                  </td>
+                                );
+                              })}
+                              <td className="pp-sc-total">{isDnp ? 'DNP' : (data.grossScore ?? '—')}</td>
+                              <td className="pp-sc-total">{isDnp ? 'DNP' : (data.netScore ?? '—')}</td>
+                              <td className="pp-sc-total pp-sc-pts">{isDnp ? 'DNP' : data.points}</td>
+                            </tr>
+                          );
+                        })}
+                      </tbody>
+                    </table>
+                  </div>
+                ))}
+              </div>
+            </>
+          )}
+
           {playerSummary && (
             <>
               <div className="pp-section-title">Player Summary</div>
@@ -1066,20 +1661,105 @@ export default function PlayerProfileModal({
             </>
           )}
 
-          {profileMetrics && (
+          {yardageInsights && (
             <>
-              <div className="pp-section-title">Player Metrics</div>
-              <div className="pp-stats-row">
-                <StatCard label="Event Wins" value={profileMetrics.eventWins} />
-                <StatCard label="Top-3 Finishes" value={profileMetrics.topThree} />
-                <StatCard label="Clean Cards" value={profileMetrics.cleanCards} />
-                <StatCard label="Birdie Rate" value={profileMetrics.birdieRate !== null ? `${profileMetrics.birdieRate.toFixed(1)}%` : '—'} />
-                <StatCard label="Par Rate" value={profileMetrics.parRate !== null ? `${profileMetrics.parRate.toFixed(1)}%` : '—'} />
-                <StatCard label="Damage Control" value={profileMetrics.damageControl !== null ? `${profileMetrics.damageControl.toFixed(0)}` : '—'} />
-                <StatCard label="Blow-Up Avoidance" value={profileMetrics.blowupAvoidance !== null ? `${profileMetrics.blowupAvoidance.toFixed(0)}` : '—'} />
-                <StatCard label="Bounce-Back" value={profileMetrics.bounceBackRate !== null ? `${profileMetrics.bounceBackRate.toFixed(1)}%` : '—'} sub={profileMetrics.bounceBackChances > 0 ? `${profileMetrics.bounceBackSuccess}/${profileMetrics.bounceBackChances}` : 'No chances'} />
-                <StatCard label="Clutch Holes" value={profileMetrics.clutchPerformance !== null ? formatSigned(profileMetrics.clutchPerformance, 2) : '—'} sub="Final 3 holes vs par" />
-                <StatCard label="Handicap Outperformance" value={profileMetrics.handicapOutperformance !== null ? formatSigned(profileMetrics.handicapOutperformance, 2) : '—'} sub="vs net par" />
+              <div className="pp-section-title">Distance Profile</div>
+              <div className="pp-distance-profile">
+                <div className="pp-distance-hero">
+                  <div className="pp-distance-summary-grid">
+                    <StatCard
+                      label="Best Distance"
+                      value={yardageInsights.bestRow ? yardageInsights.bestRow.label : '—'}
+                      sub={yardageInsights.bestRow && yardageInsights.bestRow.playerAvgVsPar !== null ? `${formatSigned(yardageInsights.bestRow.playerAvgVsPar, 2)} vs par` : undefined}
+                    />
+                    <StatCard
+                      label="Toughest Distance"
+                      value={yardageInsights.toughestRow ? yardageInsights.toughestRow.label : '—'}
+                      sub={yardageInsights.toughestRow && yardageInsights.toughestRow.playerAvgVsPar !== null ? `${formatSigned(yardageInsights.toughestRow.playerAvgVsPar, 2)} vs par` : undefined}
+                    />
+                    <StatCard
+                      label="Best Efficiency"
+                      value={yardageInsights.bestEfficiencyRow ? yardageInsights.bestEfficiencyRow.label : '—'}
+                      sub={yardageInsights.bestEfficiencyRow && yardageInsights.bestEfficiencyRow.playerYardsPerStroke !== null ? `${yardageInsights.bestEfficiencyRow.playerYardsPerStroke.toFixed(1)} y/stroke` : undefined}
+                    />
+                  </div>
+                  <p className="pp-distance-copy">
+                    Par-adjusted yardage buckets from scorecard. Each bucket shows your scoring baseline, field comparison, full scoring mix, and efficiency in one place.
+                  </p>
+                </div>
+
+                <div className="pp-distance-band-grid">
+                  {yardageInsights.rows.map((row) => {
+                    const playerVsParColor = row.playerAvgVsPar !== null
+                      ? (row.playerAvgVsPar < 0 ? '#22c55e' : row.playerAvgVsPar > 0 ? '#ef4444' : c.tick)
+                      : c.tick;
+                    const fieldVsParColor = row.fieldAvgVsPar !== null
+                      ? (row.fieldAvgVsPar < 0 ? '#22c55e' : row.fieldAvgVsPar > 0 ? '#ef4444' : c.tick)
+                      : c.tick;
+
+                    return (
+                      <div key={row.key} className="pp-distance-band-card">
+                        <div className="pp-distance-band-header">
+                          <div className="pp-distance-band-title">{row.label}</div>
+                          <div className="pp-distance-band-meta">
+                            {row.playerHoles} tracked holes · #{row.holeNumbers.join(', #') || '—'}
+                          </div>
+                        </div>
+                        <div className="pp-distance-band-metrics">
+                          <div className="pp-distance-metric-row">
+                            <span className="pp-distance-metric-label">You vs Par</span>
+                            <span className="pp-distance-metric-value" style={{ color: playerVsParColor }}>
+                              {row.playerAvgVsPar !== null ? `${row.playerAvgVsPar >= 0 ? '+' : ''}${row.playerAvgVsPar.toFixed(2)}` : '—'}
+                            </span>
+                          </div>
+                          <div className="pp-distance-metric-row">
+                            <span className="pp-distance-metric-label">Field vs Par</span>
+                            <span className="pp-distance-metric-value" style={{ color: fieldVsParColor }}>
+                              {row.fieldAvgVsPar !== null ? `${row.fieldAvgVsPar >= 0 ? '+' : ''}${row.fieldAvgVsPar.toFixed(2)}` : '—'}
+                            </span>
+                          </div>
+                          <div className="pp-distance-metric-row">
+                            <span className="pp-distance-metric-label">You Yards / Stroke</span>
+                            <span className="pp-distance-metric-value">{row.playerYardsPerStroke !== null ? row.playerYardsPerStroke.toFixed(1) : '—'}</span>
+                          </div>
+                          <div className="pp-distance-metric-row">
+                            <span className="pp-distance-metric-label">Field Yards / Stroke</span>
+                            <span className="pp-distance-metric-value">{row.fieldYardsPerStroke !== null ? row.fieldYardsPerStroke.toFixed(1) : '—'}</span>
+                          </div>
+                        </div>
+                        <div className="pp-distance-rate-block">
+                          <div className="pp-distance-rate-title">Scoring Mix</div>
+                          <div className="pp-distance-rate-grid">
+                            <div className="pp-distance-rate-pill">
+                              <span className="pp-distance-rate-label">Eagle%</span>
+                              <span className="pp-distance-rate-value">{row.playerEagleRate !== null ? `${row.playerEagleRate.toFixed(1)}% (${row.playerEagleCount})` : '—'}</span>
+                            </div>
+                            <div className="pp-distance-rate-pill">
+                              <span className="pp-distance-rate-label">Birdie%</span>
+                              <span className="pp-distance-rate-value">{row.playerBirdieRate !== null ? `${row.playerBirdieRate.toFixed(1)}% (${row.playerBirdieCount})` : '—'}</span>
+                            </div>
+                            <div className="pp-distance-rate-pill">
+                              <span className="pp-distance-rate-label">Par%</span>
+                              <span className="pp-distance-rate-value">{row.playerParRate !== null ? `${row.playerParRate.toFixed(1)}% (${row.playerParCount})` : '—'}</span>
+                            </div>
+                            <div className="pp-distance-rate-pill">
+                              <span className="pp-distance-rate-label">Bogey%</span>
+                              <span className="pp-distance-rate-value">{row.playerBogeyRate !== null ? `${row.playerBogeyRate.toFixed(1)}% (${row.playerBogeyCount})` : '—'}</span>
+                            </div>
+                            <div className="pp-distance-rate-pill">
+                              <span className="pp-distance-rate-label">Double%</span>
+                              <span className="pp-distance-rate-value">{row.playerDoubleBogeyRate !== null ? `${row.playerDoubleBogeyRate.toFixed(1)}% (${row.playerDoubleBogeyCount})` : '—'}</span>
+                            </div>
+                            <div className="pp-distance-rate-pill">
+                              <span className="pp-distance-rate-label">Triple+%</span>
+                              <span className="pp-distance-rate-value">{row.playerTriplePlusRate !== null ? `${row.playerTriplePlusRate.toFixed(1)}% (${row.playerTriplePlusCount})` : '—'}</span>
+                            </div>
+                          </div>
+                        </div>
+                      </div>
+                    );
+                  })}
+                </div>
               </div>
             </>
           )}
@@ -1105,13 +1785,17 @@ export default function PlayerProfileModal({
                   <ResponsiveContainer width="100%" height={180}>
                     <BarChart data={eventChartData} margin={{ top: 4, right: 8, left: -20, bottom: 4 }}>
                       <CartesianGrid strokeDasharray="3 3" stroke={c.grid} />
-                      <XAxis dataKey="label" stroke={c.axis} tick={{ fill: c.tick, fontSize: 11 }} />
-                      <YAxis stroke={c.axis} tick={{ fill: c.tick, fontSize: 11 }} />
+                      <XAxis dataKey="label" stroke={readableAxisStroke} tick={readableAxisTick} />
+                      <YAxis stroke={readableAxisStroke} tick={readableAxisTick} />
                       <Tooltip
-                        contentStyle={{ background: c.tooltipBg, border: `1px solid ${c.border}`, borderRadius: 8 }}
-                        labelStyle={{ color: c.text2 }}
-                        formatter={(value, name, entry: { payload?: { dropped?: boolean } }) => {
+                        contentStyle={readableTooltipStyle}
+                        labelStyle={readableTooltipLabelStyle}
+                        itemStyle={readableTooltipItemStyle}
+                        formatter={(value, name, entry: { payload?: { dropped?: boolean; dnp?: boolean } }) => {
                           if (name === 'Points') {
+                            if (entry.payload?.dnp) {
+                              return ['DNP', 'Points'];
+                            }
                             return [
                               entry.payload?.dropped ? `${value} (dropped)` : value,
                               'Points',
@@ -1138,11 +1822,12 @@ export default function PlayerProfileModal({
                   <ResponsiveContainer width="100%" height={180}>
                     <LineChart data={eventChartData} margin={{ top: 4, right: 8, left: -20, bottom: 4 }}>
                       <CartesianGrid strokeDasharray="3 3" stroke={c.grid} />
-                      <XAxis dataKey="label" stroke={c.axis} tick={{ fill: c.tick, fontSize: 11 }} />
-                      <YAxis stroke={c.axis} tick={{ fill: c.tick, fontSize: 11 }} />
+                      <XAxis dataKey="label" stroke={readableAxisStroke} tick={readableAxisTick} />
+                      <YAxis stroke={readableAxisStroke} tick={readableAxisTick} />
                       <Tooltip
-                        contentStyle={{ background: c.tooltipBg, border: `1px solid ${c.border}`, borderRadius: 8 }}
-                        labelStyle={{ color: c.text2 }}
+                        contentStyle={readableTooltipStyle}
+                        labelStyle={readableTooltipLabelStyle}
+                        itemStyle={readableTooltipItemStyle}
                       />
                       <Line type="linear" dataKey="cumulativePoints" name="Cumulative" stroke={color} strokeWidth={2.5} dot={{ r: 4, fill: color }} />
                     </LineChart>
@@ -1158,11 +1843,12 @@ export default function PlayerProfileModal({
                   <ResponsiveContainer width="100%" height={180}>
                     <LineChart data={eventChartData} margin={{ top: 4, right: 8, left: -20, bottom: 4 }}>
                       <CartesianGrid strokeDasharray="3 3" stroke={c.grid} />
-                      <XAxis dataKey="label" stroke={c.axis} tick={{ fill: c.tick, fontSize: 11 }} />
-                      <YAxis stroke={c.axis} tick={{ fill: c.tick, fontSize: 11 }} />
+                      <XAxis dataKey="label" stroke={readableAxisStroke} tick={readableAxisTick} />
+                      <YAxis stroke={readableAxisStroke} tick={readableAxisTick} />
                       <Tooltip
-                        contentStyle={{ background: c.tooltipBg, border: `1px solid ${c.border}`, borderRadius: 8 }}
-                        labelStyle={{ color: c.text2 }}
+                        contentStyle={readableTooltipStyle}
+                        labelStyle={readableTooltipLabelStyle}
+                        itemStyle={readableTooltipItemStyle}
                       />
                       <Line type="linear" dataKey="gross" stroke="#f97316" strokeWidth={2} dot={{ r: 3 }} name="Gross" connectNulls />
                       <Line type="linear" dataKey="net"   stroke="#22c55e" strokeWidth={2} dot={{ r: 3 }} name="Net"   connectNulls />
@@ -1177,11 +1863,12 @@ export default function PlayerProfileModal({
                   <ResponsiveContainer width="100%" height={180}>
                     <LineChart data={eventChartData} margin={{ top: 4, right: 8, left: -20, bottom: 4 }}>
                       <CartesianGrid strokeDasharray="3 3" stroke={c.grid} />
-                      <XAxis dataKey="label" stroke={c.axis} tick={{ fill: c.tick, fontSize: 11 }} />
-                      <YAxis stroke={c.axis} tick={{ fill: c.tick, fontSize: 11 }} />
+                      <XAxis dataKey="label" stroke={readableAxisStroke} tick={readableAxisTick} />
+                      <YAxis stroke={readableAxisStroke} tick={readableAxisTick} />
                       <Tooltip
-                        contentStyle={{ background: c.tooltipBg, border: `1px solid ${c.border}`, borderRadius: 8 }}
-                        labelStyle={{ color: c.text2 }}
+                        contentStyle={readableTooltipStyle}
+                        labelStyle={readableTooltipLabelStyle}
+                        itemStyle={readableTooltipItemStyle}
                         formatter={(value, name, entry: { payload?: { side?: string } }) => {
                           if (handicapMode !== 'front-back') return [value, name];
                           if (name === 'Front Handicap') return [value, 'Front Handicap'];
@@ -1208,12 +1895,13 @@ export default function PlayerProfileModal({
               <ResponsiveContainer width="100%" height={160}>
                 <LineChart data={eventChartData} margin={{ top: 4, right: 16, left: -20, bottom: 4 }}>
                   <CartesianGrid strokeDasharray="3 3" stroke={c.grid} />
-                  <XAxis dataKey="label" stroke={c.axis} tick={{ fill: c.tick, fontSize: 11 }} />
-                  <YAxis reversed stroke={c.axis} tick={{ fill: c.tick, fontSize: 11 }}
-                    label={{ value: 'Rank', angle: -90, position: 'insideLeft', fill: c.tick, fontSize: 11 }} />
+                  <XAxis dataKey="label" stroke={readableAxisStroke} tick={readableAxisTick} />
+                  <YAxis reversed stroke={readableAxisStroke} tick={readableAxisTick}
+                    label={{ value: 'Rank', angle: -90, position: 'insideLeft', fill: 'var(--text2)', fontSize: 11 }} />
                   <Tooltip
-                    contentStyle={{ background: c.tooltipBg, border: `1px solid ${c.border}`, borderRadius: 8 }}
-                    labelStyle={{ color: c.text2 }}
+                    contentStyle={readableTooltipStyle}
+                    labelStyle={readableTooltipLabelStyle}
+                    itemStyle={readableTooltipItemStyle}
                     formatter={(v) => [`#${v}`, 'Position']}
                   />
                   <Line type="linear" dataKey="position" name="Position" stroke={color} strokeWidth={2.5}
@@ -1268,6 +1956,48 @@ export default function PlayerProfileModal({
                 if (!group) return null;
                 const hasData = group.holes.some(h => h.rounds > 0);
                 if (!hasData) return null;
+                const hasYardage = group.holes.some((h) => h.yardage !== null);
+                const hasStrokeIndex = group.holes.some((h) => h.strokeIndex !== null);
+
+                const layoutMetrics: Array<{ label: string; value: string; detail: string }> = [];
+                if (hasYardage) {
+                  const yardageHoles = group.holes.filter((h) => h.yardage !== null);
+                  if (yardageHoles.length) {
+                    const longest = yardageHoles.reduce((best, hole) => (hole.yardage! > best.yardage! ? hole : best));
+                    const shortest = yardageHoles.reduce((best, hole) => (hole.yardage! < best.yardage! ? hole : best));
+                    layoutMetrics.push(
+                      {
+                        label: 'Longest Hole',
+                        value: `#${longest.holeNum} · ${longest.yardage} yds`,
+                        detail: 'Length snapshot',
+                      },
+                      {
+                        label: 'Shortest Hole',
+                        value: `#${shortest.holeNum} · ${shortest.yardage} yds`,
+                        detail: 'Length snapshot',
+                      },
+                    );
+                  }
+                }
+                if (hasStrokeIndex) {
+                  const hcpHoles = group.holes.filter((h) => h.strokeIndex !== null);
+                  if (hcpHoles.length) {
+                    const hardest = hcpHoles.reduce((best, hole) => (hole.strokeIndex! < best.strokeIndex! ? hole : best));
+                    const easiest = hcpHoles.reduce((best, hole) => (hole.strokeIndex! > best.strokeIndex! ? hole : best));
+                    layoutMetrics.push(
+                      {
+                        label: "Hardest H'cap",
+                        value: `#${hardest.holeNum} · ${hardest.strokeIndex}`,
+                        detail: 'Full 18-hole index',
+                      },
+                      {
+                        label: "Easiest H'cap",
+                        value: `#${easiest.holeNum} · ${easiest.strokeIndex}`,
+                        detail: 'Full 18-hole index',
+                      },
+                    );
+                  }
+                }
 
                 const chartData = group.holes.filter(h => h.playerAvg !== null);
 
@@ -1277,6 +2007,17 @@ export default function PlayerProfileModal({
                     <p className="pp-chart-label" style={{ marginBottom: 8 }}>
                       Your avg vs field avg per hole · green bar = better than field, red = worse
                     </p>
+                    {layoutMetrics.length > 0 && (
+                      <div className="recap-stat-grid" style={{ margin: '8px 0 12px' }}>
+                        {layoutMetrics.map((metric) => (
+                          <div key={`${group.nine}-${metric.label}`} className="recap-stat-card">
+                            <span className="recap-stat-label">{metric.label}</span>
+                            <span className="recap-stat-value">{metric.value}</span>
+                            <span className="recap-stat-detail">{metric.detail}</span>
+                          </div>
+                        ))}
+                      </div>
+                    )}
 
                     {/* Advantage chart */}
                     <ResponsiveContainer width="100%" height={160}>
@@ -1315,10 +2056,14 @@ export default function PlayerProfileModal({
                           <tr>
                             <th className="pp-sc-label">Hole</th>
                             <th>Par</th>
+                            {hasYardage && <th>Yards</th>}
+                            {hasStrokeIndex && <th>H'cap</th>}
                             <th>Rounds</th>
                             <th>Your Avg</th>
                             <th>vs Par</th>
                             <th>Field Avg</th>
+                            {hasYardage && <th>You Y/St</th>}
+                            {hasYardage && <th>Field Y/St</th>}
                             <th title="Your avg minus field avg — negative = better than field">vs Field</th>
                             <th title="Rank among all players by avg score on this hole (1 = best)">Rank</th>
                             <th style={{ color: '#22c55e' }}>Best</th>
@@ -1355,6 +2100,8 @@ export default function PlayerProfileModal({
                                   )}
                                 </td>
                                 <td className="pp-sc-hole-cell">{h.par}</td>
+                                {hasYardage && <td className="pp-sc-hole-cell">{h.yardage ?? '—'}</td>}
+                                {hasStrokeIndex && <td className="pp-sc-hole-cell">{h.strokeIndex ?? '—'}</td>}
                                 <td className="pp-sc-hole-cell">{h.rounds}</td>
                                 <td className="pp-sc-hole-cell" style={{ fontWeight: 600 }}>
                                   {h.playerAvg !== null ? h.playerAvg.toFixed(2) : '—'}
@@ -1367,6 +2114,16 @@ export default function PlayerProfileModal({
                                 <td className="pp-sc-hole-cell" style={{ color: c.text2 }}>
                                   {h.fieldAvg !== null ? h.fieldAvg.toFixed(2) : '—'}
                                 </td>
+                                {hasYardage && (
+                                  <td className="pp-sc-hole-cell" style={{ color: '#22c55e' }}>
+                                    {h.playerYardsPerStroke !== null ? h.playerYardsPerStroke.toFixed(1) : '—'}
+                                  </td>
+                                )}
+                                {hasYardage && (
+                                  <td className="pp-sc-hole-cell" style={{ color: c.text2 }}>
+                                    {h.fieldYardsPerStroke !== null ? h.fieldYardsPerStroke.toFixed(1) : '—'}
+                                  </td>
+                                )}
                                 <td className="pp-sc-hole-cell" style={{ color: vsFieldColor, fontWeight: 700 }}>
                                   {h.advantage !== null
                                     ? `${h.advantage >= 0 ? '+' : ''}${h.advantage.toFixed(2)}`
@@ -1397,86 +2154,6 @@ export default function PlayerProfileModal({
                 );
               })}
 
-              {/* ── Round Scorecards ─────────────────────────────── */}
-              <div className="pp-section-title">Round Scorecards</div>
-              <div className="pp-scorecard-wrap">
-                {roundScorecardGroups.map((group) => (
-                  <div key={group.nine} style={{ marginBottom: 16 }}>
-                    <p className="pp-chart-label" style={{ marginBottom: 8 }}>{group.label}</p>
-                    <table className="pp-scorecard">
-                      <thead>
-                        <tr>
-                          <th className="pp-sc-label">Event</th>
-                          <th className="pp-sc-label">Nine</th>
-                          {group.holeHeaders.map(h => (
-                            <th key={h} className="pp-sc-hole">
-                              {onHoleClick ? (
-                                <button
-                                  className="icon-btn"
-                                  style={{ width: 'auto', height: 'auto', padding: 0, color: 'var(--text)', textDecoration: 'underline' }}
-                                  onClick={() => onHoleClick(h, group.nine)}
-                                  title={`View hole ${h} profile`}
-                                >
-                                  #{h}
-                                </button>
-                              ) : `#${h}`}
-                            </th>
-                          ))}
-                          <th className="pp-sc-total">Gross</th>
-                          <th className="pp-sc-total">Net</th>
-                          <th className="pp-sc-total">Pts</th>
-                        </tr>
-                      </thead>
-                      <tbody>
-                        {group.rounds.map(({ ev, data }) => {
-                          if (!data) return null;
-                          const pars = courseConfig ? getParsForNine(courseConfig, ev.nineHoles ?? 'front') : null;
-                          const nineLabel = ev.nineHoles === 'back' ? 'Back 9' : 'Front 9';
-                          const startHole = ev.nineHoles === 'back' ? 10 : 1;
-                          const isDropped = droppedEventIds.has(ev.id);
-                          return (
-                            <tr key={ev.id} className="pp-sc-row" style={isDropped ? { background: 'rgba(148,163,184,0.10)' } : undefined}>
-                              <td className="pp-sc-label">
-                                {getEventDisplayName(ev)}{formatEventDateDisplay(ev.eventDate) ? ` · ${formatEventDateDisplay(ev.eventDate)}` : ''}
-                                {isDropped && (
-                                  <span style={{ marginLeft: 8, fontSize: 11, fontWeight: 700, color: '#94a3b8', textTransform: 'uppercase' }}>Dropped</span>
-                                )}
-                              </td>
-                              <td className="pp-sc-label">{nineLabel}</td>
-                              {data.holes.map((score, i) => {
-                                const holeNum = startHole + i;
-                                const par = pars ? pars[i] : null;
-                                const diff = score !== null && par !== null ? score - par : null;
-                                const cls = diff === null ? ''
-                                  : diff <= -2 ? 'pp-sc-eagle'
-                                  : diff === -1 ? 'pp-sc-birdie'
-                                  : diff === 0  ? 'pp-sc-par'
-                                  : diff === 1  ? 'pp-sc-bogey'
-                                  : diff === 2  ? 'pp-sc-dbl'
-                                  : 'pp-sc-trpl';
-                                return (
-                                  <td
-                                    key={i}
-                                    className={`pp-sc-hole-cell ${cls}`}
-                                    title={`Hole ${holeNum}${par ? ` · Par ${par}` : ''}`}
-                                    onClick={onHoleClick ? () => onHoleClick(holeNum, ev.nineHoles ?? 'front') : undefined}
-                                    style={onHoleClick ? { cursor: 'pointer' } : undefined}
-                                  >
-                                    {score ?? '—'}
-                                  </td>
-                                );
-                              })}
-                              <td className="pp-sc-total">{data.grossScore ?? '—'}</td>
-                              <td className="pp-sc-total">{data.netScore ?? '—'}</td>
-                              <td className="pp-sc-total pp-sc-pts">{data.points}</td>
-                            </tr>
-                          );
-                        })}
-                      </tbody>
-                    </table>
-                  </div>
-                ))}
-              </div>
             </>
           )}
         </div>

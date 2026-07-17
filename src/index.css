@@ -9,12 +9,17 @@
   --border: #2a2a4a;
   --text: #e2e2f0;
   --text2: #a0a0c0;
+  --bg-elevated: var(--bg2);
+  --card-bg: var(--bg2);
+  --card-border: var(--border);
+  --text-dim: var(--text2);
   --accent: #4f8ef7;
   --accent2: #6366f1;
   --green: #22c55e;
   --red: #ef4444;
   --gold: #f59e0b;
   --sidebar-w: 240px;
+  color-scheme: dark;
   /* chart-specific */
   --chart-grid: #2a2a3e;
   --chart-tooltip-bg: #13131f;
@@ -41,6 +46,7 @@
   --chart-tooltip-bg: #ffffff;
   --chart-axis: #888;
   --chart-tick: #555;
+  color-scheme: light;
 }
 
 html, body, #root {
@@ -173,15 +179,6 @@ input, textarea { font-family: inherit; }
   .pp-stats-row { gap: 8px; }
   .pp-stat-card { min-width: 76px; padding: 8px 10px; }
   .pp-stat-value { font-size: 18px; }
-}
-
-  /* Bigger touch targets */
   .nav-item, .mobile-nav-item { min-height: 44px; }
-  .icon-btn { width: 36px; height: 36px; }
-
-  /* Compact stat cards */
-  .pp-stats-row { gap: 8px; }
-  .pp-stat-card { min-width: 80px; padding: 8px 10px; }
-  .pp-stat-value { font-size: 18px; }
 }
 

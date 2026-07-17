@@ -1,15 +1,8 @@
 import { memo, useMemo, useState } from 'react';
-import {
-  BarChart, Bar, Cell, CartesianGrid, XAxis, YAxis, Tooltip, ResponsiveContainer,
-} from 'recharts';
 import type { EventData, CourseConfig } from '../types/golf';
 import { buildWeeklyRecaps } from '../lib/analytics';
-import { useChartColors } from '../lib/useChartColors';
-import { getPlayerColor } from '../lib/colors';
 import { buildDisplayNames } from '../lib/displayNames';
 import { computeBreakdown, getParsForNine } from '../lib/scoring';
-import { getTooltipTrigger } from '../lib/tooltip';
-import { useIsMobile } from '../lib/useIsMobile';
 import { getEventDisplayName } from '../lib/eventNames';
 import { formatEventDateDisplay } from '../lib/eventDateDisplay';
 
@@ -20,52 +13,109 @@ interface WeeklyRecapPageProps {
   onHoleClick?: (holeNum: number, nine: 'front' | 'back') => void;
 }
 
+interface LeaderboardTableRow {
+  rank: number;
+  playerName: string;
+  displayName: string;
+  value: string;
+  detail?: string;
+}
+
+interface LeaderboardTableCard {
+  title: string;
+  subtitle?: string;
+  rows: LeaderboardTableRow[];
+  hideDetailColumn?: boolean;
+}
+
 function formatPlayerNames(playerNames: string[]): string {
   const shortNames = playerNames.map(name => name.split(',')[0]);
   if (shortNames.length <= 2) return shortNames.join(' & ');
   return `${shortNames.slice(0, -1).join(', ')} & ${shortNames[shortNames.length - 1]}`;
 }
 
-function mixHexColors(startHex: string, endHex: string, ratio: number): string {
-  const clamp = Math.max(0, Math.min(1, ratio));
-  const parse = (hex: string) => {
-    const normalized = hex.replace('#', '');
+function buildLeaderboardRows<T>(
+  items: T[],
+  getPlayerName: (item: T) => string,
+  getDisplayName: (item: T) => string,
+  getScore: (item: T) => number | null,
+  sortDirection: 'asc' | 'desc',
+  formatValue: (item: T) => string,
+  formatDetail?: (item: T) => string | undefined,
+) {
+  const scored = items
+    .map((item) => ({ item, score: getScore(item) }))
+    .filter((entry): entry is { item: T; score: number } => entry.score !== null && Number.isFinite(entry.score));
+
+  scored.sort((a, b) => {
+    const primary = sortDirection === 'asc' ? a.score - b.score : b.score - a.score;
+    if (primary !== 0) return primary;
+    return getDisplayName(a.item).localeCompare(getDisplayName(b.item));
+  });
+
+  let previousScore: number | null = null;
+  let previousRank = 1;
+  return scored.slice(0, 5).map((entry, index) => {
+    const rank = previousScore !== null && Math.abs(entry.score - previousScore) < 1e-9 ? previousRank : index + 1;
+    previousScore = entry.score;
+    previousRank = rank;
     return {
-      r: Number.parseInt(normalized.slice(0, 2), 16),
-      g: Number.parseInt(normalized.slice(2, 4), 16),
-      b: Number.parseInt(normalized.slice(4, 6), 16),
+      rank,
+      playerName: getPlayerName(entry.item),
+      displayName: getDisplayName(entry.item),
+      value: formatValue(entry.item),
+      detail: formatDetail?.(entry.item),
     };
-  };
-
-  const start = parse(startHex);
-  const end = parse(endHex);
-  const toHex = (value: number) => Math.round(value).toString(16).padStart(2, '0');
-
-  const r = start.r + (end.r - start.r) * clamp;
-  const g = start.g + (end.g - start.g) * clamp;
-  const b = start.b + (end.b - start.b) * clamp;
-
-  return `#${toHex(r)}${toHex(g)}${toHex(b)}`;
+  });
 }
 
-function getDifficultyColor(avgVsPar: number, maxAbsValue: number): string {
-  if (maxAbsValue <= 0) return '#94a3b8';
-
-  const strength = Math.min(Math.abs(avgVsPar) / maxAbsValue, 1);
-  if (avgVsPar > 0) {
-    if (strength < 0.5) {
-      return mixHexColors('#fde68a', '#f59e0b', strength * 2);
-    }
-    return mixHexColors('#f59e0b', '#dc2626', (strength - 0.5) * 2);
-  }
-  if (avgVsPar < 0) return mixHexColors('#bbf7d0', '#15803d', strength);
-  return '#94a3b8';
+function LeaderboardTable({ card, onPlayerClick }: { card: LeaderboardTableCard; onPlayerClick?: (playerName: string) => void }) {
+  return (
+    <div className="recap-chart-card recap-leaderboard-card">
+      <p className="pp-chart-label">{card.title}</p>
+      {card.subtitle ? <p className="recap-leaderboard-subtitle">{card.subtitle}</p> : null}
+      {card.rows.length ? (
+        <div className="pp-scorecard-wrap">
+          <table className="pp-scorecard recap-leaderboard-table">
+            <thead>
+              <tr>
+                <th>#</th>
+                <th className="pp-sc-label">Player</th>
+                <th>Value</th>
+                {!card.hideDetailColumn ? <th>Detail</th> : null}
+              </tr>
+            </thead>
+            <tbody>
+              {card.rows.map((row, index) => (
+                <tr key={`${card.title}-${row.playerName}-${index}`} className={index % 2 === 0 ? '' : 'pp-sc-row'}>
+                  <td className="pp-sc-hole-cell" style={{ fontWeight: 700 }}>{row.rank}</td>
+                  <td className="pp-sc-label">
+                    {onPlayerClick ? (
+                      <button
+                        className="icon-btn"
+                        style={{ width: 'auto', height: 'auto', padding: 0, color: 'var(--text)', textDecoration: 'underline' }}
+                        onClick={() => onPlayerClick(row.playerName)}
+                        title={`View ${row.playerName} profile`}
+                      >
+                        {row.displayName}
+                      </button>
+                    ) : row.displayName}
+                  </td>
+                  <td className="pp-sc-total">{row.value}</td>
+                  {!card.hideDetailColumn ? <td className="recap-leaderboard-detail">{row.detail ?? '—'}</td> : null}
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      ) : (
+        <p className="pp-no-course">No data for this metric yet.</p>
+      )}
+    </div>
+  );
 }
 
 export default memo(function WeeklyRecapPage({ events, courseConfig, onPlayerClick, onHoleClick }: WeeklyRecapPageProps) {
-  const c = useChartColors();
-  const isMobile = useIsMobile();
-  const tooltipTrigger = getTooltipTrigger(isMobile);
   const recaps = useMemo(() => buildWeeklyRecaps(events, courseConfig), [events, courseConfig]);
   const [eventNumber, setEventNumber] = useState<number | null>(() => recaps.at(-1)?.eventNumber ?? null);
   const sortedEvents = useMemo(() => [...events].sort((a, b) => a.eventNumber - b.eventNumber), [events]);
@@ -120,78 +170,6 @@ export default memo(function WeeklyRecapPage({ events, courseConfig, onPlayerCli
       pointsSpread: points.length ? Math.max(...points) - Math.min(...points) : null,
       netSpread: netScores.length ? Math.max(...netScores) - Math.min(...netScores) : null,
       grossSpread: grossScores.length ? Math.max(...grossScores) - Math.min(...grossScores) : null,
-    };
-  }, [activePlayers, courseConfig, event]);
-
-  const eventMetrics = useMemo(() => {
-    if (!event || !activePlayers.length) return null;
-
-    const pars = courseConfig ? getParsForNine(courseConfig, event.nineHoles) : null;
-    const cleanCardPlayers = activePlayers
-      .filter((player) => player.doubleBogeys + player.tripleBogeys + player.other === 0)
-      .map((player) => player.playerName);
-
-    const damageControlRows = activePlayers.map((player) => {
-      const totalTracked = player.birdies + player.pars + player.bogeys + player.doubleBogeys + player.tripleBogeys + player.other;
-      const weightedMistakePenalty = (player.bogeys * 1) + (player.doubleBogeys * 2) + (player.tripleBogeys * 3) + (player.other * 4);
-      const score = totalTracked > 0 ? 1 - (weightedMistakePenalty / (totalTracked * 4)) : Number.NaN;
-      return { playerName: player.playerName, score };
-    }).filter((row) => Number.isFinite(row.score));
-    const bestDamageControlScore = damageControlRows.length ? Math.max(...damageControlRows.map((row) => row.score)) : null;
-    const bestDamageControlPlayers = bestDamageControlScore === null ? [] : damageControlRows.filter((row) => row.score === bestDamageControlScore).map((row) => row.playerName);
-
-    const bounceBackRows = pars ? activePlayers.map((player) => {
-      const diffs = player.holes.map((score, index) => score === null ? null : score - pars[index]);
-      let successes = 0;
-      let chances = 0;
-      for (let index = 0; index < diffs.length - 1; index += 1) {
-        const currentDiff = diffs[index];
-        const nextDiff = diffs[index + 1];
-        if (currentDiff === null || nextDiff === null || currentDiff < 1) continue;
-        chances += 1;
-        if (nextDiff <= 0) successes += 1;
-      }
-      return {
-        playerName: player.playerName,
-        chances,
-        successes,
-        rate: chances > 0 ? successes / chances : Number.NaN,
-      };
-    }).filter((row) => row.chances > 0) : [];
-    const bestBounceBackRate = bounceBackRows.length ? Math.max(...bounceBackRows.map((row) => row.rate)) : null;
-    const bestBounceBackPlayers = bestBounceBackRate === null ? [] : bounceBackRows.filter((row) => row.rate === bestBounceBackRate).map((row) => row.playerName);
-    const bestBounceBackDetail = bestBounceBackRate === null ? null : bounceBackRows.find((row) => row.rate === bestBounceBackRate) ?? null;
-
-    const clutchRows = pars ? activePlayers.map((player) => {
-      const closingDiffs = player.holes.slice(-3)
-        .map((score, index) => score === null ? null : score - pars[pars.length - 3 + index])
-        .filter((value): value is number => value !== null);
-      const averageDiff = closingDiffs.length ? closingDiffs.reduce((sum, value) => sum + value, 0) / closingDiffs.length : Number.NaN;
-      return { playerName: player.playerName, averageDiff };
-    }).filter((row) => Number.isFinite(row.averageDiff)) : [];
-    const bestClutchScore = clutchRows.length ? Math.min(...clutchRows.map((row) => row.averageDiff)) : null;
-    const bestClutchPlayers = bestClutchScore === null ? [] : clutchRows.filter((row) => row.averageDiff === bestClutchScore).map((row) => row.playerName);
-
-    const handicapRows = pars ? activePlayers
-      .filter((player): player is typeof player & { netScore: number } => player.netScore !== null)
-      .map((player) => {
-        const totalPar = pars.reduce((sum, par) => sum + par, 0);
-        return { playerName: player.playerName, outperformance: totalPar - player.netScore };
-      }) : [];
-    const bestHandicapOutperformance = handicapRows.length ? Math.max(...handicapRows.map((row) => row.outperformance)) : null;
-    const bestHandicapPlayers = bestHandicapOutperformance === null ? [] : handicapRows.filter((row) => row.outperformance === bestHandicapOutperformance).map((row) => row.playerName);
-
-    return {
-      cleanCardPlayers,
-      bestDamageControlScore,
-      bestDamageControlPlayers,
-      bestBounceBackPlayers,
-      bestBounceBackDetail,
-      bestClutchPlayers,
-      bestClutchScore,
-      bestHandicapPlayers,
-      bestHandicapOutperformance,
-      hasParData: !!pars,
     };
   }, [activePlayers, courseConfig, event]);
 
@@ -297,72 +275,15 @@ export default memo(function WeeklyRecapPage({ events, courseConfig, onPlayerCli
     };
   }, [roundPlayerStats]);
 
-  const roundStrugglers = useMemo(() => {
-    if (!event || !activePlayers.length) return null;
-
-    const lowestPoints = Math.min(...activePlayers.map((player) => player.points), Number.POSITIVE_INFINITY);
-    const mostPointsLeftBehind = Number.isFinite(lowestPoints)
-      ? {
-          playerNames: activePlayers.filter((player) => player.points === lowestPoints).map((player) => player.playerName),
-          points: lowestPoints,
-        }
-      : null;
-
-    const netPlayers = activePlayers.filter((player): player is typeof player & { netScore: number } => player.netScore !== null);
-    const grossPlayers = activePlayers.filter((player): player is typeof player & { grossScore: number } => player.grossScore !== null);
-
-    const highestNet = netPlayers.length ? Math.max(...netPlayers.map((player) => player.netScore)) : null;
-    const toughestNet = highestNet !== null
-      ? {
-          playerNames: netPlayers.filter((player) => player.netScore === highestNet).map((player) => player.playerName),
-          netScore: highestNet,
-        }
-      : null;
-
-    const highestGross = grossPlayers.length ? Math.max(...grossPlayers.map((player) => player.grossScore)) : null;
-    const toughestGross = highestGross !== null
-      ? {
-          playerNames: grossPlayers.filter((player) => player.grossScore === highestGross).map((player) => player.playerName),
-          grossScore: highestGross,
-        }
-      : null;
-
-    let biggestSlide: { playerNames: string[]; drop: number } | null = null;
-    if (previousEvent) {
-      let maxDrop = 0;
-      const sliders: string[] = [];
-      for (const standing of event.standings) {
-        const previousStanding = previousEvent.standings.find((item) => item.playerName === standing.playerName);
-        if (!previousStanding) continue;
-        const drop = standing.position - previousStanding.position;
-        if (drop > maxDrop) {
-          maxDrop = drop;
-          sliders.length = 0;
-          sliders.push(standing.playerName);
-        } else if (drop > 0 && drop === maxDrop) {
-          sliders.push(standing.playerName);
-        }
-      }
-      if (maxDrop > 0) {
-        biggestSlide = { playerNames: sliders, drop: maxDrop };
-      }
-    }
-
-    return {
-      mostPointsLeftBehind,
-      toughestNet,
-      toughestGross,
-      biggestSlide,
-    };
-  }, [activePlayers, event, previousEvent]);
-
   const holeDifficultyData = useMemo(() => {
     if (!event || !courseConfig) return [];
 
     const pars = getParsForNine(courseConfig, event.nineHoles);
     const startHole = event.nineHoles === 'back' ? 10 : 1;
+    const scorecardHoles = courseConfig.holes.slice(startHole - 1, startHole + 8);
 
     return pars.map((par, holeIndex) => {
+      const scorecardHole = scorecardHoles[holeIndex];
       const scores = activePlayers
         .map(player => player.holes[holeIndex])
         .filter((score): score is number => score !== null && score !== undefined);
@@ -372,7 +293,11 @@ export default memo(function WeeklyRecapPage({ events, courseConfig, onPlayerCli
           hole: `${startHole + holeIndex}`,
           avgVsPar: 0,
           avgScore: null,
+          bestScore: null,
+          worstScore: null,
           par,
+          yardage: scorecardHole?.yardage ?? null,
+          strokeIndex: scorecardHole?.strokeIndex ?? null,
         };
       }
 
@@ -381,14 +306,14 @@ export default memo(function WeeklyRecapPage({ events, courseConfig, onPlayerCli
         hole: `${startHole + holeIndex}`,
         avgVsPar: Math.round((avgScore - par) * 100) / 100,
         avgScore: Math.round(avgScore * 100) / 100,
+        bestScore: Math.min(...scores),
+        worstScore: Math.max(...scores),
         par,
+        yardage: scorecardHole?.yardage ?? null,
+        strokeIndex: scorecardHole?.strokeIndex ?? null,
       };
     });
   }, [activePlayers, courseConfig, event]);
-
-  const maxHoleDifficultyMagnitude = useMemo(() => {
-    return holeDifficultyData.reduce((max, hole) => Math.max(max, Math.abs(hole.avgVsPar)), 0);
-  }, [holeDifficultyData]);
 
   const eventMeta = useMemo(() => {
     if (!event) return [] as string[];
@@ -456,7 +381,292 @@ export default memo(function WeeklyRecapPage({ events, courseConfig, onPlayerCli
     return getParsForNine(courseConfig, event.nineHoles);
   }, [courseConfig, event]);
 
-  const leaderChartData = useMemo(() => pointsLeaderboard.slice(0, 5), [pointsLeaderboard]);
+  const recapLeaderboards = useMemo(() => {
+    if (!event) return null;
+
+    const pars = courseConfig ? getParsForNine(courseConfig, event.nineHoles) : null;
+
+    const cleanCardRows = activePlayers.map((player) => {
+      const breakdown = pars
+        ? computeBreakdown(player.holes, pars)
+        : {
+            birdies: player.birdies,
+            pars: player.pars,
+            bogeys: player.bogeys,
+            doubleBogeys: player.doubleBogeys,
+            tripleBogeys: player.tripleBogeys,
+            other: player.other,
+          };
+      const doublePlus = breakdown.doubleBogeys + breakdown.tripleBogeys + breakdown.other;
+      return {
+        playerName: player.playerName,
+        displayName: displayNames[player.playerName] ?? player.playerName.split(',')[0],
+        doublePlus,
+        bogeysOrWorse: breakdown.bogeys + doublePlus,
+      };
+    });
+
+    const damageRows = activePlayers.map((player) => {
+      const totalTracked = player.birdies + player.pars + player.bogeys + player.doubleBogeys + player.tripleBogeys + player.other;
+      const weightedMistakePenalty = (player.bogeys * 1) + (player.doubleBogeys * 2) + (player.tripleBogeys * 3) + (player.other * 4);
+      const score = totalTracked > 0 ? 1 - (weightedMistakePenalty / (totalTracked * 4)) : Number.NaN;
+      return {
+        playerName: player.playerName,
+        displayName: displayNames[player.playerName] ?? player.playerName.split(',')[0],
+        score,
+      };
+    });
+
+    const bounceRows = pars ? activePlayers.map((player) => {
+      const diffs = player.holes.map((score, index) => score === null ? null : score - pars[index]);
+      let successes = 0;
+      let chances = 0;
+      for (let index = 0; index < diffs.length - 1; index += 1) {
+        const currentDiff = diffs[index];
+        const nextDiff = diffs[index + 1];
+        if (currentDiff === null || nextDiff === null || currentDiff < 1) continue;
+        chances += 1;
+        if (nextDiff <= 0) successes += 1;
+      }
+      return {
+        playerName: player.playerName,
+        displayName: displayNames[player.playerName] ?? player.playerName.split(',')[0],
+        chances,
+        successes,
+        rate: chances > 0 ? successes / chances : Number.NaN,
+      };
+    }) : [];
+
+    const clutchRows = pars ? activePlayers.map((player) => {
+      const closingDiffs = player.holes.slice(-3)
+        .map((score, index) => score === null ? null : score - pars[pars.length - 3 + index])
+        .filter((value): value is number => value !== null);
+      const averageDiff = closingDiffs.length ? closingDiffs.reduce((sum, value) => sum + value, 0) / closingDiffs.length : Number.NaN;
+      return {
+        playerName: player.playerName,
+        displayName: displayNames[player.playerName] ?? player.playerName.split(',')[0],
+        averageDiff,
+      };
+    }) : [];
+
+    const moverRows = event.standings.map((standing) => {
+      const previousStanding = previousEvent?.standings.find((item) => item.playerName === standing.playerName) ?? null;
+      const change = previousStanding ? previousStanding.position - standing.position : Number.NaN;
+      return {
+        playerName: standing.playerName,
+        displayName: displayNames[standing.playerName] ?? standing.playerName.split(',')[0],
+        change,
+      };
+    });
+
+    const slideRows = event.standings.map((standing) => {
+      const previousStanding = previousEvent?.standings.find((item) => item.playerName === standing.playerName) ?? null;
+      const drop = previousStanding ? standing.position - previousStanding.position : Number.NaN;
+      return {
+        playerName: standing.playerName,
+        displayName: displayNames[standing.playerName] ?? standing.playerName.split(',')[0],
+        drop,
+      };
+    });
+
+    return {
+      eventMetrics: [
+        {
+          title: 'Clean Cards',
+          subtitle: 'Double-plus mistakes kept off the card',
+          hideDetailColumn: true,
+          rows: buildLeaderboardRows(
+            cleanCardRows,
+            (row) => row.playerName,
+            (row) => row.displayName,
+            (row) => (row.doublePlus * 100) + row.bogeysOrWorse,
+            'asc',
+            (row) => `${row.doublePlus} double+ (${row.bogeysOrWorse} bogeys)`,
+            (row) => `${row.bogeysOrWorse} bogeys or worse`
+          ),
+        },
+        {
+          title: 'Best Damage Control',
+          subtitle: 'Weighted mistake control this week',
+          hideDetailColumn: true,
+          rows: buildLeaderboardRows(
+            damageRows,
+            (row) => row.playerName,
+            (row) => row.displayName,
+            (row) => row.score,
+            'desc',
+            (row) => `${(row.score * 100).toFixed(1)}`,
+            () => 'weighted control'
+          ),
+        },
+        {
+          title: 'Bounce-Back Leader',
+          subtitle: 'Who answered mistakes fastest',
+          hideDetailColumn: true,
+          rows: buildLeaderboardRows(
+            bounceRows,
+            (row) => row.playerName,
+            (row) => row.displayName,
+            (row) => row.rate,
+            'desc',
+            (row) => `${row.successes}/${row.chances}`,
+            (row) => `${row.successes}/${row.chances}`
+          ),
+        },
+        {
+          title: 'Best Closer',
+          subtitle: 'Final 3 holes vs par',
+          hideDetailColumn: true,
+          rows: buildLeaderboardRows(
+            clutchRows,
+            (row) => row.playerName,
+            (row) => row.displayName,
+            (row) => row.averageDiff,
+            'asc',
+            (row) => `${row.averageDiff >= 0 ? '+' : ''}${row.averageDiff.toFixed(2)}`,
+            () => 'avg vs par'
+          ),
+        },
+      ],
+      roundLeaders: [
+        {
+          title: 'Most Points Gained',
+          subtitle: 'Weekly points leaderboard',
+          hideDetailColumn: true,
+          rows: buildLeaderboardRows(
+            pointsLeaderboard,
+            (row) => row.playerName,
+            (row) => row.shortName,
+            (row) => row.points,
+            'desc',
+            (row) => `${row.points}`,
+            (row) => `Net ${row.netScore ?? '—'} · Gross ${row.grossScore ?? '—'}`
+          ),
+        },
+        {
+          title: 'Best Net Round',
+          subtitle: 'Lowest net score this week',
+          hideDetailColumn: true,
+          rows: buildLeaderboardRows(
+            activePlayers.filter((player): player is typeof player & { netScore: number } => player.netScore !== null).map((player) => ({
+              playerName: player.playerName,
+              displayName: displayNames[player.playerName] ?? player.playerName.split(',')[0],
+              netScore: player.netScore,
+              grossScore: player.grossScore,
+            })),
+            (row) => row.playerName,
+            (row) => row.displayName,
+            (row) => row.netScore,
+            'asc',
+            (row) => `${row.netScore}`,
+            (row) => `Gross ${row.grossScore ?? '—'}`
+          ),
+        },
+        {
+          title: 'Best Gross Round',
+          subtitle: 'Lowest gross score this week',
+          hideDetailColumn: true,
+          rows: buildLeaderboardRows(
+            activePlayers.filter((player): player is typeof player & { grossScore: number } => player.grossScore !== null).map((player) => ({
+              playerName: player.playerName,
+              displayName: displayNames[player.playerName] ?? player.playerName.split(',')[0],
+              grossScore: player.grossScore,
+              netScore: player.netScore,
+            })),
+            (row) => row.playerName,
+            (row) => row.displayName,
+            (row) => row.grossScore,
+            'asc',
+            (row) => `${row.grossScore}`,
+            (row) => `Net ${row.netScore ?? '—'}`
+          ),
+        },
+        {
+          title: 'Biggest Mover',
+          subtitle: 'Position change vs previous event',
+          hideDetailColumn: true,
+          rows: buildLeaderboardRows(
+            moverRows,
+            (row) => row.playerName,
+            (row) => row.displayName,
+            (row) => row.change,
+            'desc',
+            (row) => `${row.change > 0 ? '+' : ''}${row.change}`,
+            () => 'spots'
+          ),
+        },
+      ],
+      roundStrugglers: [
+        {
+          title: 'Fewest Points Won',
+          subtitle: 'Bottom of the points sheet',
+          hideDetailColumn: true,
+          rows: buildLeaderboardRows(
+            pointsLeaderboard,
+            (row) => row.playerName,
+            (row) => row.shortName,
+            (row) => row.points,
+            'asc',
+            (row) => `${row.points}`,
+            (row) => `Net ${row.netScore ?? '—'} · Gross ${row.grossScore ?? '—'}`
+          ),
+        },
+        {
+          title: 'Toughest Net Round',
+          subtitle: 'Highest net score this week',
+          hideDetailColumn: true,
+          rows: buildLeaderboardRows(
+            activePlayers.filter((player): player is typeof player & { netScore: number } => player.netScore !== null).map((player) => ({
+              playerName: player.playerName,
+              displayName: displayNames[player.playerName] ?? player.playerName.split(',')[0],
+              netScore: player.netScore,
+              grossScore: player.grossScore,
+            })),
+            (row) => row.playerName,
+            (row) => row.displayName,
+            (row) => row.netScore,
+            'desc',
+            (row) => `${row.netScore}`,
+            (row) => `Gross ${row.grossScore ?? '—'}`
+          ),
+        },
+        {
+          title: 'Toughest Gross Round',
+          subtitle: 'Highest gross score this week',
+          hideDetailColumn: true,
+          rows: buildLeaderboardRows(
+            activePlayers.filter((player): player is typeof player & { grossScore: number } => player.grossScore !== null).map((player) => ({
+              playerName: player.playerName,
+              displayName: displayNames[player.playerName] ?? player.playerName.split(',')[0],
+              grossScore: player.grossScore,
+              netScore: player.netScore,
+            })),
+            (row) => row.playerName,
+            (row) => row.displayName,
+            (row) => row.grossScore,
+            'desc',
+            (row) => `${row.grossScore}`,
+            (row) => `Net ${row.netScore ?? '—'}`
+          ),
+        },
+        {
+          title: 'Biggest Slide',
+          subtitle: 'Position drop vs previous event',
+          hideDetailColumn: true,
+          rows: buildLeaderboardRows(
+            slideRows,
+            (row) => row.playerName,
+            (row) => row.displayName,
+            (row) => row.drop,
+            'desc',
+            (row) => `${row.drop > 0 ? '+' : ''}${row.drop}`,
+            () => 'spots'
+          ),
+        },
+      ],
+      coursePlayerTables: [],
+    };
+  }, [activePlayers, courseConfig, displayNames, event, pointsLeaderboard, previousEvent, roundPlayerStats]);
 
   if (!recaps.length || !recap) {
     return (
@@ -490,59 +700,6 @@ export default memo(function WeeklyRecapPage({ events, courseConfig, onPlayerCli
             </option>
           ))}
         </select>
-      </div>
-
-      <div className="pp-section-title">Week Snapshot</div>
-      <div className="recap-stat-grid">
-        <div className="recap-stat-card">
-          <span className="recap-stat-label">Field Size</span>
-          <span className="recap-stat-value">{recapStats?.fieldSize ?? '—'}</span>
-          <span className="recap-stat-detail">Players who posted a round</span>
-        </div>
-        <div className="recap-stat-card">
-          <span className="recap-stat-label">Total Birdies</span>
-          <span className="recap-stat-value">{recapStats?.totalBirdies ?? '—'}</span>
-          <span className="recap-stat-detail">Across the whole field</span>
-        </div>
-        <div className="recap-stat-card">
-          <span className="recap-stat-label">Points Spread</span>
-          <span className="recap-stat-value">{recapStats?.pointsSpread ?? '—'}</span>
-          <span className="recap-stat-detail">Gap from top points to bottom</span>
-        </div>
-        <div className="recap-stat-card">
-          <span className="recap-stat-label">Net Spread</span>
-          <span className="recap-stat-value">{recapStats?.netSpread ?? '—'}</span>
-          <span className="recap-stat-detail">Best to worst net score</span>
-        </div>
-      </div>
-
-      <div className="pp-section-title">Event Metrics</div>
-      <div className="story-grid recap-story-grid recap-story-grid-secondary">
-        <div className={`story-card recap-story-card ${eventMetrics?.cleanCardPlayers.length ? 'story-good' : 'story-neutral'}`}>
-          <span className="story-title">Clean Cards</span>
-          <span className="story-value">{eventMetrics ? eventMetrics.cleanCardPlayers.length : '—'}</span>
-          <span className="story-detail">{eventMetrics?.cleanCardPlayers.length ? renderPlayerNames(eventMetrics.cleanCardPlayers) : 'No double+ free rounds this week'}</span>
-        </div>
-        <div className={`story-card recap-story-card ${eventMetrics?.bestDamageControlPlayers.length ? 'story-good' : 'story-neutral'}`}>
-          <span className="story-title">Best Damage Control</span>
-          <span className="story-value">{eventMetrics?.bestDamageControlPlayers.length ? renderPlayerNames(eventMetrics.bestDamageControlPlayers) : '—'}</span>
-          <span className="story-detail">{eventMetrics?.bestDamageControlScore !== null && eventMetrics?.bestDamageControlScore !== undefined ? `${(eventMetrics.bestDamageControlScore * 100).toFixed(1)} weighted control` : 'No scoring data'}</span>
-        </div>
-        <div className={`story-card recap-story-card ${eventMetrics?.bestBounceBackPlayers.length ? 'story-good' : 'story-neutral'}`}>
-          <span className="story-title">Bounce-Back Leader</span>
-          <span className="story-value">{eventMetrics?.bestBounceBackPlayers.length ? renderPlayerNames(eventMetrics.bestBounceBackPlayers) : '—'}</span>
-          <span className="story-detail">{eventMetrics?.bestBounceBackDetail ? `${eventMetrics.bestBounceBackDetail.successes}/${eventMetrics.bestBounceBackDetail.chances} bounce-backs` : 'Need course pars and bounce-back chances'}</span>
-        </div>
-        <div className={`story-card recap-story-card ${eventMetrics?.bestClutchPlayers.length ? 'story-good' : 'story-neutral'}`}>
-          <span className="story-title">Best Closer</span>
-          <span className="story-value">{eventMetrics?.bestClutchPlayers.length ? renderPlayerNames(eventMetrics.bestClutchPlayers) : '—'}</span>
-          <span className="story-detail">{eventMetrics?.bestClutchScore !== null && eventMetrics?.bestClutchScore !== undefined ? `${eventMetrics.bestClutchScore >= 0 ? '+' : ''}${eventMetrics.bestClutchScore.toFixed(2)} avg vs par on final 3` : 'Need course pars for clutch analysis'}</span>
-        </div>
-        <div className={`story-card recap-story-card ${eventMetrics?.bestHandicapPlayers.length ? 'story-good' : 'story-neutral'}`}>
-          <span className="story-title">Best Handicap Beat</span>
-          <span className="story-value">{eventMetrics?.bestHandicapPlayers.length ? renderPlayerNames(eventMetrics.bestHandicapPlayers) : '—'}</span>
-          <span className="story-detail">{eventMetrics?.bestHandicapOutperformance !== null && eventMetrics?.bestHandicapOutperformance !== undefined ? `${eventMetrics.bestHandicapOutperformance >= 0 ? '+' : ''}${eventMetrics.bestHandicapOutperformance.toFixed(1)} vs net par` : 'Need course pars and net scores'}</span>
-        </div>
       </div>
 
       <div className="recap-scoreboard-card recap-chart-card">
@@ -621,120 +778,142 @@ export default memo(function WeeklyRecapPage({ events, courseConfig, onPlayerCli
         </div>
       </div>
 
-      <div className="pp-section-title">Round Leaders</div>
-      <div className="recap-chart-card recap-inline-chart-card">
-        <p className="pp-chart-label">Points leaderboard</p>
-        <ResponsiveContainer width="100%" height={Math.max(220, leaderChartData.length * 34)}>
-          <BarChart data={leaderChartData} layout="vertical" margin={{ top: 6, right: 12, left: isMobile ? 0 : 8, bottom: 6 }}>
-            <CartesianGrid strokeDasharray="3 3" stroke={c.grid} />
-            <XAxis type="number" stroke={c.axis} tick={{ fill: c.tick, fontSize: 11 }} />
-            <YAxis dataKey="shortName" type="category" stroke={c.axis} tick={{ fill: c.tick, fontSize: 11 }} width={isMobile ? 68 : 80} />
-            <Tooltip
-              trigger={tooltipTrigger}
-              contentStyle={{ background: c.tooltipBg, border: `1px solid ${c.border}`, borderRadius: 8 }}
-              labelStyle={{ color: c.text2 }}
-              formatter={(value, name, entry: { payload?: { netScore: number | null; grossScore: number | null } }) => {
-                if (name === 'points') {
-                  return [`${Number(value ?? 0)} pts`, `Net ${entry.payload?.netScore ?? '—'} · Gross ${entry.payload?.grossScore ?? '—'}`];
-                }
-                return [value, name];
-              }}
-            />
-            <Bar dataKey="points" radius={[0, 8, 8, 0]}>
-              {leaderChartData.map(player => (
-                <Cell key={player.playerName} fill={getPlayerColor(player.playerName)} />
-              ))}
-            </Bar>
-          </BarChart>
-        </ResponsiveContainer>
-      </div>
-      <div className="story-grid recap-story-grid">
-        <div className="story-card recap-story-card story-good">
-          <span className="story-title">Most Points Gained</span>
-          <span className="story-value">{recap.winner ? renderPlayerNames(recap.winner.playerNames) : '—'}</span>
-          <span className="story-detail">{recap.winner ? `${recap.winner.points} points` : 'No data'}</span>
+      <div className="pp-section-title">Week Snapshot</div>
+      <div className="recap-stat-grid">
+        <div className="recap-stat-card">
+          <span className="recap-stat-label">Field Size</span>
+          <span className="recap-stat-value">{recapStats?.fieldSize ?? '—'}</span>
+          <span className="recap-stat-detail">Players who posted a round</span>
         </div>
-        <div className="story-card recap-story-card story-neutral">
-          <span className="story-title">Best Net Round</span>
-          <span className="story-value">{recap.bestNet ? renderPlayerNames(recap.bestNet.playerNames) : '—'}</span>
-          <span className="story-detail">{recap.bestNet ? `${recap.bestNet.netScore} net` : 'No data'}</span>
+        <div className="recap-stat-card">
+          <span className="recap-stat-label">Total Birdies</span>
+          <span className="recap-stat-value">{recapStats?.totalBirdies ?? '—'}</span>
+          <span className="recap-stat-detail">Across the whole field</span>
         </div>
-        <div className="story-card recap-story-card story-neutral">
-          <span className="story-title">Best Gross Round</span>
-          <span className="story-value">{recap.bestGross ? renderPlayerNames(recap.bestGross.playerNames) : '—'}</span>
-          <span className="story-detail">{recap.bestGross ? `${recap.bestGross.grossScore} gross` : 'No data'}</span>
+        <div className="recap-stat-card">
+          <span className="recap-stat-label">Points Spread</span>
+          <span className="recap-stat-value">{recapStats?.pointsSpread ?? '—'}</span>
+          <span className="recap-stat-detail">Gap from top points to bottom</span>
         </div>
-        <div className={`story-card recap-story-card ${recap.biggestMover ? 'story-good' : 'story-neutral'}`}>
-          <span className="story-title">Biggest Mover</span>
-          <span className="story-value">{recap.biggestMover ? renderPlayerNames(recap.biggestMover.playerNames) : 'No change'}</span>
-          <span className="story-detail">{recap.biggestMover ? `Moved up ${recap.biggestMover.change} spots` : 'No upward movers that week'}</span>
+        <div className="recap-stat-card">
+          <span className="recap-stat-label">Net Spread</span>
+          <span className="recap-stat-value">{recapStats?.netSpread ?? '—'}</span>
+          <span className="recap-stat-detail">Best to worst net score</span>
         </div>
       </div>
 
+      <div className="pp-section-title">Event Metrics</div>
+      <div className="recap-leaderboard-grid">
+        {recapLeaderboards?.eventMetrics.map((card) => <LeaderboardTable key={card.title} card={card} onPlayerClick={onPlayerClick} />)}
+      </div>
+
+      <div className="pp-section-title">Round Leaders</div>
+      <div className="recap-leaderboard-grid">
+        {recapLeaderboards?.roundLeaders.map((card) => <LeaderboardTable key={card.title} card={card} onPlayerClick={onPlayerClick} />)}
+      </div>
+
       <div className="pp-section-title">Round Strugglers</div>
-      <div className="story-grid recap-story-grid">
-        <div className={`story-card recap-story-card ${roundStrugglers?.mostPointsLeftBehind ? 'story-warn' : 'story-neutral'}`}>
-          <span className="story-title">Fewest Points Won</span>
-          <span className="story-value">{roundStrugglers?.mostPointsLeftBehind ? renderPlayerNames(roundStrugglers.mostPointsLeftBehind.playerNames) : '—'}</span>
-          <span className="story-detail">{roundStrugglers?.mostPointsLeftBehind ? `${roundStrugglers.mostPointsLeftBehind.points} points` : 'No data'}</span>
-        </div>
-        <div className={`story-card recap-story-card ${roundStrugglers?.toughestNet ? 'story-warn' : 'story-neutral'}`}>
-          <span className="story-title">Toughest Net Round</span>
-          <span className="story-value">{roundStrugglers?.toughestNet ? renderPlayerNames(roundStrugglers.toughestNet.playerNames) : '—'}</span>
-          <span className="story-detail">{roundStrugglers?.toughestNet ? `${roundStrugglers.toughestNet.netScore} net` : 'No data'}</span>
-        </div>
-        <div className={`story-card recap-story-card ${roundStrugglers?.toughestGross ? 'story-warn' : 'story-neutral'}`}>
-          <span className="story-title">Toughest Gross Round</span>
-          <span className="story-value">{roundStrugglers?.toughestGross ? renderPlayerNames(roundStrugglers.toughestGross.playerNames) : '—'}</span>
-          <span className="story-detail">{roundStrugglers?.toughestGross ? `${roundStrugglers.toughestGross.grossScore} gross` : 'No data'}</span>
-        </div>
-        <div className={`story-card recap-story-card ${roundStrugglers?.biggestSlide ? 'story-warn' : 'story-neutral'}`}>
-          <span className="story-title">Biggest Slide</span>
-          <span className="story-value">{roundStrugglers?.biggestSlide ? renderPlayerNames(roundStrugglers.biggestSlide.playerNames) : 'No change'}</span>
-          <span className="story-detail">{roundStrugglers?.biggestSlide ? `Dropped ${roundStrugglers.biggestSlide.drop} spots` : 'No one dropped in the standings'}</span>
-        </div>
+      <div className="recap-leaderboard-grid">
+        {recapLeaderboards?.roundStrugglers.map((card) => <LeaderboardTable key={card.title} card={card} onPlayerClick={onPlayerClick} />)}
       </div>
 
       <div className="pp-section-title">Course Snapshot</div>
       <div className="recap-chart-card recap-inline-chart-card">
         <p className="pp-chart-label">Hole difficulty this week</p>
         {holeDifficultyData.length ? (
-          <ResponsiveContainer width="100%" height={260}>
-            <BarChart data={holeDifficultyData} margin={{ top: 6, right: 12, left: isMobile ? -18 : -12, bottom: 6 }}>
-              <CartesianGrid strokeDasharray="3 3" stroke={c.grid} />
-              <XAxis dataKey="hole" stroke={c.axis} tick={{ fill: c.tick, fontSize: 11 }} />
-              <YAxis stroke={c.axis} tick={{ fill: c.tick, fontSize: 11 }} />
-              <Tooltip
-                trigger={tooltipTrigger}
-                contentStyle={{ background: c.tooltipBg, border: `1px solid ${c.border}`, borderRadius: 8 }}
-                labelStyle={{ color: c.text2 }}
-                formatter={(value, name, entry: { payload?: { avgScore: number | null; par: number } }) => {
-                  if (name === 'avgVsPar') {
-                    const numericValue = Number(value ?? 0);
-                    const label = `${numericValue >= 0 ? '+' : ''}${numericValue.toFixed(2)} vs par`;
-                    const detail = `Avg ${entry.payload?.avgScore ?? '—'} on par ${entry.payload?.par ?? '—'}`;
-                    return [label, detail];
-                  }
-                  return [value, name];
-                }}
-              />
-              <Bar dataKey="avgVsPar" radius={[8, 8, 0, 0]}>
-                {holeDifficultyData.map((hole) => (
-                  <Cell key={hole.hole} fill={getDifficultyColor(hole.avgVsPar, maxHoleDifficultyMagnitude)} />
-                ))}
-              </Bar>
-            </BarChart>
-          </ResponsiveContainer>
+          <>
+            <div className="pp-scorecard-wrap">
+              <table className="pp-scorecard">
+                <thead>
+                  <tr>
+                    <th className="pp-sc-label">Hole</th>
+                    {holeDifficultyData.map((hole) => (
+                      <th key={`hole-header-${hole.hole}`} className="pp-sc-hole">
+                        {onHoleClick ? (
+                          <button
+                            className="icon-btn"
+                            style={{ width: 'auto', height: 'auto', padding: 0, color: 'var(--text)', textDecoration: 'underline' }}
+                            onClick={() => onHoleClick(Number(hole.hole), recapNine)}
+                            title={`View hole ${hole.hole} profile`}
+                          >
+                            #{hole.hole}
+                          </button>
+                        ) : `#${hole.hole}`}
+                      </th>
+                    ))}
+                  </tr>
+                  {scorecardPars && (
+                    <tr>
+                      <th className="pp-sc-label pp-sc-par-row">Par</th>
+                      {scorecardPars.map((par, index) => <th key={`par-${index}`} className="pp-sc-hole pp-sc-par-cell">{par}</th>)}
+                    </tr>
+                  )}
+                  {holeDifficultyData.some((hole) => hole.yardage !== null) && (
+                    <tr>
+                      <th className="pp-sc-label">Yardage</th>
+                      {holeDifficultyData.map((hole) => (
+                        <th key={`yardage-${hole.hole}`} className="pp-sc-hole pp-sc-par-cell">
+                          {hole.yardage ?? '—'}
+                        </th>
+                      ))}
+                    </tr>
+                  )}
+                  {holeDifficultyData.some((hole) => hole.strokeIndex !== null) && (
+                    <tr>
+                      <th className="pp-sc-label">Stroke Index</th>
+                      {holeDifficultyData.map((hole) => (
+                        <th key={`stroke-index-${hole.hole}`} className="pp-sc-hole pp-sc-par-cell" title="Based on the full 18-hole scorecard">
+                          {hole.strokeIndex ?? '—'}
+                        </th>
+                      ))}
+                    </tr>
+                  )}
+                </thead>
+                <tbody>
+                  <tr>
+                    <th className="pp-sc-label">Field Avg</th>
+                    {holeDifficultyData.map((hole) => (
+                      <td key={`avg-${hole.hole}`} className="pp-sc-total">{hole.avgScore !== null ? hole.avgScore.toFixed(2) : '—'}</td>
+                    ))}
+                  </tr>
+                  <tr>
+                    <th className="pp-sc-label">Best</th>
+                    {holeDifficultyData.map((hole) => (
+                      <td key={`best-${hole.hole}`} className="pp-sc-total" style={{ color: '#22c55e', fontWeight: 700 }}>
+                        {hole.bestScore !== null ? hole.bestScore : '—'}
+                      </td>
+                    ))}
+                  </tr>
+                  <tr>
+                    <th className="pp-sc-label">Worst</th>
+                    {holeDifficultyData.map((hole) => (
+                      <td key={`worst-${hole.hole}`} className="pp-sc-total" style={{ color: '#ef4444', fontWeight: 700 }}>
+                        {hole.worstScore !== null ? hole.worstScore : '—'}
+                      </td>
+                    ))}
+                  </tr>
+                  <tr className="pp-sc-row">
+                    <th className="pp-sc-label">vs Par</th>
+                    {holeDifficultyData.map((hole) => (
+                      <td key={`vs-par-${hole.hole}`} className="pp-sc-hole-cell" style={{ fontWeight: 700, color: hole.avgVsPar < 0 ? '#22c55e' : hole.avgVsPar > 0 ? '#ef4444' : 'var(--text2)' }}>
+                        {hole.avgScore !== null ? `${hole.avgVsPar >= 0 ? '+' : ''}${hole.avgVsPar.toFixed(2)}` : '—'}
+                      </td>
+                    ))}
+                  </tr>
+                </tbody>
+              </table>
+            </div>
+            {holeDifficultyData.some((hole) => hole.strokeIndex !== null) && (
+              <p className="chart-subtitle" style={{ marginTop: 10 }}>
+                Stroke index is shown from the full 18-hole scorecard, even when the round is only one side.
+              </p>
+            )}
+          </>
         ) : (
           <p className="pp-no-course">Set a course scorecard to unlock weekly hole-difficulty visuals.</p>
         )}
       </div>
-      <div className="story-grid recap-story-grid recap-story-grid-secondary">
-        <div className="story-card recap-story-card story-neutral">
-          <span className="story-title">Cleanest Card</span>
-          <span className="story-value">{recap.cleanestCard ? renderPlayerNames(recap.cleanestCard.playerNames) : '—'}</span>
-          <span className="story-detail">{recap.cleanestCard ? `${recap.cleanestCard.bogeysOrWorse} bogeys or worse` : 'No data'}</span>
-        </div>
+      <div className="recap-leaderboard-grid recap-leaderboard-grid-secondary">
         <div className={`story-card recap-story-card ${recap.hardestHole ? 'story-warn' : 'story-neutral'}`}>
           <span className="story-title">Hardest Hole</span>
           <span className="story-value">{recap.hardestHole ? renderHoleLabel(recap.hardestHole.holeNum) : '—'}</span>

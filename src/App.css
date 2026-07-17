@@ -42,6 +42,87 @@
   color: var(--text-dim);
 }
 
+.season-storyline-grid {
+  margin-bottom: 12px;
+}
+
+.season-storyline-table .pp-sc-label {
+  text-align: left;
+}
+
+.season-storyline-value {
+  font-weight: 700;
+}
+
+.season-storyline-value-good {
+  color: #22c55e;
+}
+
+.season-storyline-value-warn {
+  color: #f59e0b;
+}
+
+.season-storyline-value-neutral {
+  color: var(--text);
+}
+
+.season-storyline-toggle {
+  width: 100%;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 20px 24px;
+  margin: -20px -24px 0;
+  border: 0;
+  background: transparent;
+  color: inherit;
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+
+.season-storyline-card-collapsed .season-storyline-toggle {
+  margin-bottom: -20px;
+}
+
+.season-storyline-card-collapsed {
+  padding-bottom: 20px;
+}
+
+.season-storyline-toggle:focus-visible {
+  outline: 2px solid color-mix(in srgb, var(--accent) 65%, white 10%);
+  outline-offset: 4px;
+  border-radius: 10px;
+}
+
+.season-storyline-toggle-title {
+  color: var(--text);
+  font-size: 14px;
+  font-weight: 700;
+}
+
+.season-storyline-toggle-action {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 34px;
+  height: 34px;
+  border-radius: 999px;
+  border: 1px solid var(--card-border);
+  background: color-mix(in srgb, var(--bg-elevated) 85%, transparent);
+  color: var(--text2);
+  line-height: 1;
+}
+
+.season-storyline-toggle-icon {
+  transition: transform 160ms ease;
+}
+
+.season-storyline-toggle-icon.is-expanded {
+  transform: rotate(180deg);
+}
+
 .recap-stat-grid {
   display: grid;
   grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
@@ -168,6 +249,40 @@
 
 .recap-story-grid-secondary {
   margin-bottom: 12px;
+}
+
+.recap-leaderboard-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
+  gap: 12px;
+  margin-bottom: 12px;
+}
+
+.recap-leaderboard-grid-secondary {
+  margin-bottom: 12px;
+}
+
+.recap-leaderboard-card {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.recap-leaderboard-subtitle {
+  margin: 0;
+  font-size: 0.82rem;
+  color: var(--text-dim);
+}
+
+.recap-leaderboard-table th:nth-child(2),
+.recap-leaderboard-table td:nth-child(2) {
+  text-align: left;
+}
+
+.recap-leaderboard-detail {
+  color: var(--text2);
+  font-size: 11px;
+  text-align: left;
 }
 
 .recap-story-card {
@@ -679,11 +794,12 @@
   border: 1px solid var(--border);
   border-radius: 16px;
   width: min(95vw, 920px);
-  max-height: none;
-  height: fit-content;
+  max-height: calc(100vh - 48px);
+  height: auto;
   display: flex;
   flex-direction: column;
-  overflow: hidden;
+  overflow-y: auto;
+  overflow-x: hidden;
   margin: auto;
   flex-shrink: 0;
 }
@@ -695,6 +811,10 @@
   padding: 18px 22px 16px;
   border-bottom: 1px solid var(--border);
   flex-shrink: 0;
+  position: sticky;
+  top: 0;
+  z-index: 2;
+  background: var(--bg2);
 }
 
 .pp-header-left {
@@ -845,6 +965,147 @@
   color: var(--text2);
 }
 
+.pp-distance-profile {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+  margin: 8px 0 14px;
+}
+
+.pp-distance-hero {
+  border: 1px solid color-mix(in srgb, var(--border) 72%, transparent);
+  border-radius: 14px;
+  background: linear-gradient(180deg, color-mix(in srgb, var(--bg3) 88%, white 12%), var(--bg2));
+  padding: 14px;
+}
+
+.pp-distance-summary-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(170px, 1fr));
+  gap: 10px;
+}
+
+.pp-distance-copy {
+  margin: 12px 0 0;
+  font-size: 12px;
+  line-height: 1.55;
+  color: var(--text2);
+}
+
+.pp-distance-band-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 12px;
+}
+
+@media (max-width: 980px) {
+  .pp-distance-band-grid {
+    grid-template-columns: 1fr;
+  }
+}
+
+.pp-distance-band-card {
+  border: 1px solid color-mix(in srgb, var(--border) 70%, transparent);
+  background: var(--bg2);
+  border-radius: 14px;
+  padding: 14px 15px;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  box-shadow: inset 0 1px 0 color-mix(in srgb, white 5%, transparent);
+}
+
+.pp-distance-band-header {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  padding-bottom: 10px;
+  border-bottom: 1px solid color-mix(in srgb, var(--border) 68%, transparent);
+}
+
+.pp-distance-band-title {
+  font-size: 13px;
+  line-height: 1.45;
+  font-weight: 700;
+  color: var(--text);
+}
+
+.pp-distance-band-meta {
+  font-size: 11px;
+  color: var(--text2);
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+}
+
+.pp-distance-band-metrics {
+  display: grid;
+  gap: 8px;
+}
+
+.pp-distance-rate-block {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding-top: 10px;
+  border-top: 1px solid color-mix(in srgb, var(--border) 68%, transparent);
+}
+
+.pp-distance-rate-title {
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--text2);
+}
+
+.pp-distance-rate-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 8px;
+}
+
+.pp-distance-rate-pill {
+  border: 1px solid color-mix(in srgb, var(--border) 72%, transparent);
+  background: color-mix(in srgb, var(--bg3) 70%, transparent);
+  border-radius: 10px;
+  padding: 8px 9px;
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+}
+
+.pp-distance-rate-label {
+  font-size: 10px;
+  color: var(--text2);
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+}
+
+.pp-distance-rate-value {
+  font-size: 13px;
+  font-weight: 700;
+  color: var(--text);
+}
+
+.pp-distance-metric-row {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.pp-distance-metric-label {
+  font-size: 11px;
+  color: var(--text2);
+}
+
+.pp-distance-metric-value {
+  font-size: 13px;
+  font-weight: 700;
+  color: var(--text);
+  text-align: right;
+}
+
 /* ── Chart pairs ── */
 .pp-charts-row {
   display: grid;
@@ -920,6 +1181,47 @@
 .pp-sc-trpl     { background: rgba(124,58,237,0.2); color: #a78bfa; font-weight: 700; }
 
 @media (max-width: 720px) {
+  .yardage-trend-panel {
+    padding: 12px;
+  }
+
+  .yardage-trend-lane {
+    grid-template-columns: 1fr;
+    gap: 8px;
+  }
+
+  .yardage-trend-main-top,
+  .yardage-trend-specialist-footer {
+    flex-direction: column;
+    align-items: flex-start;
+  }
+
+  .pp-distance-hero {
+    padding: 12px;
+  }
+
+  .pp-distance-band-grid {
+    grid-template-columns: 1fr;
+  }
+
+  .pp-distance-band-card {
+    padding: 12px;
+  }
+
+  .pp-distance-metric-row {
+    align-items: flex-start;
+    flex-direction: column;
+    gap: 2px;
+  }
+
+  .pp-distance-rate-grid {
+    grid-template-columns: 1fr 1fr;
+  }
+
+  .pp-distance-metric-value {
+    text-align: left;
+  }
+
   .pp-scorecard th,
   .pp-scorecard td {
     padding: 5px 6px;
@@ -1174,6 +1476,531 @@
   font-weight: 500;
 }
 
+.yardage-trend-metric-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(320px, 1fr));
+  gap: 12px;
+  margin-bottom: 16px;
+}
+
+.yardage-trend-metric-card {
+  border: 1px solid color-mix(in srgb, var(--border) 72%, transparent);
+  border-radius: 16px;
+  background: color-mix(in srgb, var(--bg2) 88%, var(--bg3) 12%);
+  box-shadow: inset 0 1px 0 color-mix(in srgb, white 6%, transparent);
+  padding: 14px;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.yardage-trend-metric-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: baseline;
+  gap: 10px;
+}
+
+.yardage-trend-metric-hint {
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--text2);
+}
+
+.yardage-trend-podium {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.yardage-trend-podium-row {
+  border: 1px solid color-mix(in srgb, var(--border) 70%, transparent);
+  background: color-mix(in srgb, var(--bg3) 84%, var(--bg2) 16%);
+  border-radius: 12px;
+  padding: 8px 10px;
+  display: grid;
+  grid-template-columns: 34px minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 10px;
+  text-align: left;
+}
+
+.yardage-trend-podium-row:hover {
+  background: color-mix(in srgb, var(--bg4) 78%, var(--bg3) 22%);
+}
+
+.yardage-trend-podium-rank {
+  width: 26px;
+  height: 26px;
+  border-radius: 999px;
+  border: 1px solid color-mix(in srgb, var(--border) 78%, transparent);
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 10px;
+  font-weight: 700;
+  color: var(--text2);
+}
+
+.yardage-trend-podium-player {
+  font-size: 13px;
+  font-weight: 700;
+  color: var(--text);
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.yardage-trend-podium-value {
+  font-size: 13px;
+  font-weight: 800;
+}
+
+.yardage-trend-track {
+  position: relative;
+  height: 28px;
+  border-radius: 999px;
+  border: 1px solid color-mix(in srgb, var(--border) 70%, transparent);
+  background: color-mix(in srgb, var(--bg3) 78%, transparent);
+}
+
+.yardage-trend-track-dot {
+  position: absolute;
+  top: 6px;
+  width: 14px;
+  height: 14px;
+  border-radius: 999px;
+  border: 2px solid var(--bg2);
+  box-shadow: 0 0 0 1px color-mix(in srgb, var(--border) 80%, transparent);
+}
+
+.yardage-trend-track-scale {
+  display: flex;
+  justify-content: space-between;
+  gap: 10px;
+  font-size: 11px;
+  color: var(--text2);
+}
+
+.yardage-trend-xy-card {
+  border: 1px solid color-mix(in srgb, var(--border) 72%, transparent);
+  border-radius: 16px;
+  background: color-mix(in srgb, var(--bg2) 88%, var(--bg3) 12%);
+  box-shadow: inset 0 1px 0 color-mix(in srgb, white 6%, transparent);
+  padding: 14px;
+  margin-bottom: 16px;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.yardage-trend-xy-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: baseline;
+  gap: 10px;
+}
+
+.yardage-trend-xy-plot-wrap {
+  display: grid;
+  grid-template-columns: 18px minmax(0, 1fr);
+  gap: 8px;
+  align-items: stretch;
+}
+
+.yardage-trend-xy-y-label {
+  writing-mode: vertical-rl;
+  transform: rotate(180deg);
+  font-size: 10px;
+  font-weight: 600;
+  color: var(--text2);
+  text-align: center;
+}
+
+.yardage-trend-xy-plot {
+  position: relative;
+  min-height: 240px;
+  border: 1px solid color-mix(in srgb, var(--border) 72%, transparent);
+  border-radius: 12px;
+  background:
+    linear-gradient(to right, color-mix(in srgb, var(--border) 35%, transparent) 1px, transparent 1px) 0 0 / 20% 100%,
+    linear-gradient(to top, color-mix(in srgb, var(--border) 35%, transparent) 1px, transparent 1px) 0 0 / 100% 20%,
+    color-mix(in srgb, var(--bg3) 86%, var(--bg2) 14%);
+}
+
+.yardage-trend-xy-cross-x,
+.yardage-trend-xy-cross-y {
+  position: absolute;
+  z-index: 1;
+  background: color-mix(in srgb, var(--accent) 28%, var(--border));
+  pointer-events: none;
+}
+
+.yardage-trend-xy-cross-x {
+  left: 0;
+  right: 0;
+  height: 2px;
+}
+
+.yardage-trend-xy-cross-y {
+  top: 0;
+  bottom: 0;
+  width: 2px;
+}
+
+.yardage-trend-xy-quadrant {
+  position: absolute;
+  z-index: 1;
+  font-size: 10px;
+  font-weight: 700;
+  color: var(--text2);
+  background: color-mix(in srgb, var(--bg2) 82%, transparent);
+  border: 1px solid color-mix(in srgb, var(--border) 65%, transparent);
+  border-radius: 999px;
+  padding: 2px 7px;
+  pointer-events: none;
+}
+
+.yardage-trend-xy-quadrant-tl { top: 8px; left: 8px; }
+.yardage-trend-xy-quadrant-tr { top: 8px; right: 8px; }
+.yardage-trend-xy-quadrant-bl { bottom: 8px; left: 8px; }
+.yardage-trend-xy-quadrant-br { bottom: 8px; right: 8px; }
+
+.yardage-trend-xy-dot {
+  position: absolute;
+  z-index: 2;
+  width: 16px;
+  height: 16px;
+  border-radius: 999px;
+  border: 2px solid var(--bg2);
+  box-shadow: 0 0 0 1px color-mix(in srgb, var(--border) 80%, transparent);
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.yardage-trend-xy-dot-top {
+  width: 20px;
+  height: 20px;
+  box-shadow: 0 0 0 2px color-mix(in srgb, var(--bg2) 90%, transparent), 0 0 0 3px color-mix(in srgb, var(--border) 75%, transparent);
+}
+
+.yardage-trend-xy-dot-rank {
+  font-size: 10px;
+  font-weight: 800;
+  color: #fff;
+  line-height: 1;
+}
+
+.yardage-trend-xy-x-label {
+  text-align: center;
+  font-size: 10px;
+  font-weight: 600;
+  color: var(--text2);
+}
+
+.yardage-trend-xy-scale {
+  display: flex;
+  justify-content: space-between;
+  gap: 10px;
+  font-size: 11px;
+  color: var(--text2);
+}
+
+.yardage-trend-xy-legend {
+  display: flex;
+  gap: 14px;
+  flex-wrap: wrap;
+  font-size: 11px;
+  color: var(--text2);
+}
+
+.yardage-trend-xy-legend-dot {
+  width: 10px;
+  height: 10px;
+  border-radius: 999px;
+  border: 1px solid color-mix(in srgb, var(--border) 80%, transparent);
+  background: color-mix(in srgb, var(--text2) 70%, transparent);
+  display: inline-block;
+  margin-right: 6px;
+  vertical-align: middle;
+}
+
+.yardage-trend-xy-legend-dot-top {
+  width: 12px;
+  height: 12px;
+  background: color-mix(in srgb, var(--accent) 70%, var(--text2));
+}
+
+.yardage-trend-readout {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  max-height: 220px;
+  overflow-y: auto;
+  padding-right: 2px;
+}
+
+.yardage-trend-readout-head {
+  display: grid;
+  grid-template-columns: 40px minmax(0, 1fr) auto auto;
+  gap: 8px;
+  padding: 0 8px;
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: 0.05em;
+  text-transform: uppercase;
+  color: var(--text2);
+}
+
+.yardage-trend-readout-row {
+  border: 1px solid color-mix(in srgb, var(--border) 72%, transparent);
+  background: color-mix(in srgb, var(--bg3) 82%, var(--bg2) 18%);
+  border-radius: 10px;
+  padding: 6px 8px;
+  display: grid;
+  grid-template-columns: 40px minmax(0, 1fr) auto auto;
+  align-items: center;
+  gap: 8px;
+  text-align: left;
+}
+
+.yardage-trend-readout-row:hover {
+  background: color-mix(in srgb, var(--bg4) 78%, var(--bg3) 22%);
+}
+
+.yardage-trend-readout-rank {
+  font-size: 11px;
+  font-weight: 700;
+  color: var(--text2);
+}
+
+.yardage-trend-readout-player {
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--text);
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.yardage-trend-readout-value {
+  font-size: 12px;
+  font-weight: 800;
+  text-align: right;
+}
+
+.yardage-trend-spotlight-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(240px, 1fr));
+  gap: 12px;
+  margin-bottom: 16px;
+}
+
+.yardage-trend-spotlight-card {
+  border: 1px solid color-mix(in srgb, var(--border) 72%, transparent);
+  border-radius: 18px;
+  padding: 18px;
+  background: color-mix(in srgb, var(--bg2) 88%, var(--bg3) 12%);
+  box-shadow: inset 0 1px 0 color-mix(in srgb, white 6%, transparent);
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.yardage-trend-spotlight-card-alt {
+  border-color: color-mix(in srgb, var(--accent) 20%, var(--border));
+}
+
+.yardage-trend-spotlight-label {
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+  color: var(--text2);
+}
+
+.yardage-trend-spotlight-player {
+  font-size: 18px;
+  font-weight: 700;
+  color: var(--text);
+}
+
+.yardage-trend-spotlight-value {
+  font-size: 28px;
+  line-height: 1;
+  font-weight: 800;
+}
+
+.yardage-trend-spotlight-value-good {
+  color: #22c55e;
+}
+
+.yardage-trend-spotlight-value-cool {
+  color: #4f8ef7;
+}
+
+.yardage-trend-spotlight-detail {
+  font-size: 12px;
+  color: var(--text2);
+}
+
+.yardage-trend-panel {
+  border: 1px solid color-mix(in srgb, var(--border) 72%, transparent);
+  border-radius: 16px;
+  background: color-mix(in srgb, var(--bg2) 88%, var(--bg3) 12%);
+  box-shadow: inset 0 1px 0 color-mix(in srgb, white 6%, transparent);
+  padding: 14px;
+}
+
+.yardage-trend-lanes {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.yardage-trend-lane {
+  width: 100%;
+  border: 1px solid color-mix(in srgb, var(--border) 70%, transparent);
+  border-radius: 14px;
+  background: color-mix(in srgb, var(--bg3) 82%, var(--bg2) 18%);
+  padding: 10px 12px;
+  display: grid;
+  grid-template-columns: 42px minmax(0, 1fr);
+  gap: 12px;
+  text-align: left;
+}
+
+.yardage-trend-lane:hover {
+  background: color-mix(in srgb, var(--bg4) 80%, var(--bg3) 20%);
+}
+
+.yardage-trend-rank {
+  width: 32px;
+  height: 32px;
+  border-radius: 999px;
+  border: 1px solid color-mix(in srgb, var(--border) 78%, transparent);
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  color: var(--text2);
+  font-size: 11px;
+  font-weight: 700;
+}
+
+.yardage-trend-main {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  min-width: 0;
+}
+
+.yardage-trend-main-top {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 10px;
+}
+
+.yardage-trend-player {
+  font-size: 13px;
+  font-weight: 700;
+  color: var(--text);
+}
+
+.yardage-trend-value {
+  font-size: 13px;
+  font-weight: 800;
+}
+
+.yardage-trend-value-good {
+  color: #22c55e;
+}
+
+.yardage-trend-value-cool {
+  color: #4f8ef7;
+}
+
+.yardage-trend-bar-shell {
+  width: 100%;
+  height: 10px;
+  border-radius: 999px;
+  background: color-mix(in srgb, var(--bg4) 85%, transparent);
+  overflow: hidden;
+}
+
+.yardage-trend-bar {
+  height: 100%;
+  border-radius: 999px;
+}
+
+.yardage-trend-detail {
+  font-size: 11px;
+  color: var(--text2);
+}
+
+.yardage-trend-specialists {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.yardage-trend-specialist-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(240px, 1fr));
+  gap: 12px;
+}
+
+.yardage-trend-specialist-card {
+  border: 1px solid color-mix(in srgb, var(--border) 72%, transparent);
+  border-radius: 16px;
+  padding: 14px;
+  background: color-mix(in srgb, var(--bg2) 88%, var(--bg3) 12%);
+  box-shadow: inset 0 1px 0 color-mix(in srgb, white 6%, transparent);
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  text-align: left;
+}
+
+.yardage-trend-specialist-card:hover {
+  background: color-mix(in srgb, var(--bg4) 78%, var(--bg2) 22%);
+}
+
+.yardage-trend-specialist-band {
+  font-size: 11px;
+  color: var(--text2);
+  line-height: 1.5;
+}
+
+.yardage-trend-specialist-player {
+  font-size: 15px;
+  font-weight: 700;
+  color: var(--text);
+}
+
+.yardage-trend-specialist-footer {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+.yardage-trend-specialist-metric {
+  font-size: 18px;
+  font-weight: 800;
+  color: #22c55e;
+}
+
+.yardage-trend-specialist-detail {
+  font-size: 11px;
+  color: var(--text2);
+}
+
 .empty-state { display: flex; flex-direction: column; align-items: center; justify-content: center; min-height: 180px; }
 .empty-text { color: var(--text2); font-size: 13px; margin-top: 12px; }
 
@@ -1183,6 +2010,55 @@
   display: flex;
   flex-direction: column;
   gap: 24px;
+}
+
+.overview-panel-card {
+  padding-top: 16px;
+}
+
+.overview-panel-tabs {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  padding-bottom: 14px;
+  margin-bottom: 14px;
+  border-bottom: 1px solid var(--border);
+}
+
+.overview-panel-tab {
+  border: 1px solid var(--border);
+  background: var(--bg4);
+  color: var(--text2);
+  border-radius: 999px;
+  padding: 8px 12px;
+  font-size: 12px;
+  font-weight: 700;
+  cursor: pointer;
+}
+
+.overview-panel-tab.active {
+  background: color-mix(in srgb, var(--accent) 16%, var(--bg4));
+  border-color: color-mix(in srgb, var(--accent) 32%, var(--border));
+  color: var(--text);
+}
+
+.overview-panel-content {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+}
+
+.overview-panel-controls {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+  margin-bottom: 8px;
+}
+
+.overview-panel-controls-label {
+  color: var(--text2);
+  font-size: 12px;
 }
 
 /* legacy — kept for reference but no longer used on overview */
@@ -1227,7 +2103,23 @@
 }
 
 .standings-table tr:hover td { background: var(--bg4); }
-.standings-table tr.row-dnp td { color: #444; }
+.standings-table tr.row-dnp td { color: var(--text2); }
+
+.recharts-tooltip-wrapper .recharts-default-tooltip {
+  background: var(--bg2) !important;
+  border: 1px solid var(--border) !important;
+  border-radius: 10px !important;
+  box-shadow: 0 8px 20px color-mix(in srgb, black 24%, transparent);
+  color: var(--text) !important;
+}
+
+.recharts-tooltip-wrapper .recharts-tooltip-label {
+  color: var(--text) !important;
+}
+
+.recharts-tooltip-wrapper .recharts-tooltip-item {
+  color: var(--text) !important;
+}
 
 .pos-cell { width: 44px; }
 
@@ -1703,6 +2595,10 @@
   width: min(95vw, 880px);
 }
 
+.modal-explain-rank {
+  width: min(96vw, 1200px);
+}
+
 /* ===== Scorecard layout ===== */
 .sc-body { gap: 16px; }
 .sc-name-row { display: flex; align-items: center; gap: 12px; }
@@ -2058,7 +2954,10 @@
   transition: background 0.12s, border-color 0.12s, opacity 0.15s;
   background: var(--bg3);
 }
-.player-card:hover { background: var(--bg4); border-color: #555; }
+.player-card:hover {
+  background: var(--bg4);
+  border-color: color-mix(in srgb, var(--border) 60%, var(--text2));
+}
 .player-card-inactive { opacity: 0.45; }
 .player-card-inactive:hover { opacity: 0.7; }
 
@@ -2067,7 +2966,7 @@
   height: 36px;
   border-radius: 50%;
   background: var(--bg4);
-  color: #fff;
+  color: var(--text);
   display: flex;
   align-items: center;
   justify-content: center;
@@ -2247,15 +3146,42 @@
 }
 
 .legend-item:hover {
-  border-color: #555;
+  border-color: color-mix(in srgb, var(--border) 62%, var(--text2));
   color: var(--text);
 }
 
 .legend-item.legend-selected {
-  border-color: #666;
+  border-color: color-mix(in srgb, var(--border) 55%, var(--text));
   background: var(--bg4);
   color: var(--text);
   font-weight: 600;
+}
+
+.pp-star-value {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.pp-star-rating {
+  position: relative;
+  display: inline-block;
+  font-size: 14px;
+  line-height: 1;
+  letter-spacing: 1px;
+}
+
+.pp-star-rating-base {
+  color: var(--text2);
+}
+
+.pp-star-rating-fill {
+  position: absolute;
+  left: 0;
+  top: 0;
+  overflow: hidden;
+  white-space: nowrap;
+  color: #fbbf24;
 }
 
 .legend-item.legend-dimmed {
