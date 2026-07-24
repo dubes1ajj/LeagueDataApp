@@ -201,6 +201,7 @@ function migrateEvents(data: LeagueData): LeagueData {
         ...(data.analysisSettings?.weights ?? {}),
       },
     },
+    yardageBandSettings: normalizeYardageBandSettings(data.yardageBandSettings),
     events: data.events.map(e => {
       if (!e.nineHoles) return { ...e, nineHoles: 'front' as const };
       return e;
@@ -283,15 +284,22 @@ export function saveCourseTemplate(config: CourseConfig): void {
 }
 
 export function loadPlayerConfigById(id: string): PlayerConfig {
+  function normalizePlayerConfig(config: PlayerConfig): PlayerConfig {
+    return {
+      active: config?.active ?? {},
+      nicknames: config?.nicknames ?? {},
+    };
+  }
+
   try {
     const raw = localStorage.getItem(lk(id, 'players'));
-    if (raw) return JSON.parse(raw) as PlayerConfig;
+    if (raw) return normalizePlayerConfig(JSON.parse(raw) as PlayerConfig);
     if (id === '2026') {
       const legacyRaw = localStorage.getItem(PLAYERS_KEY);
-      if (legacyRaw) return JSON.parse(legacyRaw) as PlayerConfig;
+      if (legacyRaw) return normalizePlayerConfig(JSON.parse(legacyRaw) as PlayerConfig);
     }
   } catch { /* ignore */ }
-  return { active: {} };
+  return { active: {}, nicknames: {} };
 }
 
 export function savePlayerConfigById(id: string, config: PlayerConfig): void {
@@ -579,7 +587,7 @@ export function applyAutoHide(config: PlayerConfig, events: EventData[]): Player
       }
     }
   }
-  return { active };
+  return { active, nicknames: { ...(config.nicknames ?? {}) } };
 }
 
 export function addEvent(data: LeagueData, newEvent: EventData): LeagueData {

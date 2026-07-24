@@ -3,6 +3,26 @@
 ## Goal
 Stabilize analytics correctness, improve user trust and readability, and scale performance for larger seasons while keeping iteration speed high.
 
+## Requested Todo (2026-07-24)
+
+- [ ] Settings > Event Details: add editable Front/Back side field for existing events.
+  - Acceptance: admin can toggle or select side (Front/Back) and save changes; standings/charts update from edited value.
+
+- [ ] Add Event Data From URL: allow manual side selection override (Front/Back) in addition to auto-detection.
+  - Acceptance: user can keep auto-detected value or explicitly choose side before saving import.
+
+- [ ] Add Event Data From URL: prompt user to fetch weather for event location.
+  - Acceptance: import flow asks whether to fetch weather; if confirmed, weather fetch runs and stores result; if declined, import continues without weather.
+
+- [ ] Settings > League Members: support nickname editing from preset list or custom entry.
+  - Acceptance: admin can choose an existing nickname preset or type a custom nickname per player and persist it.
+
+- [ ] Yardage Bands: support Manual and Automatic modes.
+  - Acceptance: manual mode preserves current behavior; automatic mode analyzes course hole yardages and groups holes into computed bands.
+
+- [ ] Trends Page: redesign yardage trends dots layout to avoid current arc clustering artifact.
+  - Acceptance: dots distribute clearly (no forced arc shape), remain readable with multiple players, and preserve tooltip/legend behavior.
+
 ## Planning Assumptions
 - Team capacity baseline: 1 engineer, part-time product/design input.
 - Sprint length: 1 week.

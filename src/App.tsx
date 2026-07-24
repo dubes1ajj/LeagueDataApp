@@ -1,4 +1,4 @@
-import React, { useState, useCallback, useMemo, useEffect } from 'react';
+import React, { useState, useCallback, useMemo, useEffect, lazy, Suspense } from 'react';
 import {
   BUILT_IN_LEAGUES, fetchAvailableLeagues, getActiveLeagueId, getLatestLeagueId, getStoredActiveLeagueId, setActiveLeagueIdStorage,
   loadLeagueDataById, saveLeagueDataById,
@@ -13,24 +13,7 @@ import type { BuiltInLeague, LeagueSnapshot } from './lib/storage';
 import { recalculateCumulativeStandings } from './lib/parser';
 import type { EventData, LeagueData, CourseConfig, ColorSchemeConfig, HandicapMode, PlayerConfig } from './types/golf';
 import type { AdjustedScoringSettings, EventDateDisplaySettings, EventWeather, LeagueAnalysisSettings, LeagueWeatherSettings } from './types/golf';
-import AddEventModal from './components/AddEventModal';
-import BumpChart from './components/BumpChart';
-import WeeklyPointsChart from './components/WeeklyPointsChart';
-import HandicapTrendChart from './components/HandicapTrendChart';
-import ScoringBreakdownChart from './components/ScoringBreakdownChart';
-import GrossNetScoresChart from './components/GrossNetScoresChart';
-import HoleStatsChart from './components/HoleStatsChart';
-import HoleProfileModal from './components/HoleProfileModal';
-import CumulativePointsChart from './components/CumulativePointsChart';
 import EventList from './components/EventList';
-import CourseConfigModal from './components/CourseConfigModal';
-import PlayerProfileModal from './components/PlayerProfileModal';
-import AdminUnlockModal from './components/AdminUnlockModal';
-import SettingsPage from './components/SettingsPage';
-import SeasonDashboard from './components/SeasonDashboard';
-import WeeklyRecapPage from './components/WeeklyRecapPage';
-import EventFilterBar from './components/EventFilterBar';
-import TrendsPage from './components/TrendsPage';
 import { useAdminMode } from './lib/useAdminMode';
 import { setPlayerColorOverrides } from './lib/colors';
 import { DEFAULT_EVENT_DATE_DISPLAY, setEventDateDisplaySettings } from './lib/eventDateDisplay';
@@ -42,6 +25,24 @@ import {
 import { useTheme } from './lib/useTheme';
 import { useFilteredEvents } from './lib/useFilteredEvents';
 import './App.css';
+
+const AddEventModal = lazy(() => import('./components/AddEventModal'));
+const BumpChart = lazy(() => import('./components/BumpChart'));
+const WeeklyPointsChart = lazy(() => import('./components/WeeklyPointsChart'));
+const HandicapTrendChart = lazy(() => import('./components/HandicapTrendChart'));
+const ScoringBreakdownChart = lazy(() => import('./components/ScoringBreakdownChart'));
+const GrossNetScoresChart = lazy(() => import('./components/GrossNetScoresChart'));
+const HoleStatsChart = lazy(() => import('./components/HoleStatsChart'));
+const HoleProfileModal = lazy(() => import('./components/HoleProfileModal'));
+const CumulativePointsChart = lazy(() => import('./components/CumulativePointsChart'));
+const CourseConfigModal = lazy(() => import('./components/CourseConfigModal'));
+const PlayerProfileModal = lazy(() => import('./components/PlayerProfileModal'));
+const AdminUnlockModal = lazy(() => import('./components/AdminUnlockModal'));
+const SettingsPage = lazy(() => import('./components/SettingsPage'));
+const SeasonDashboard = lazy(() => import('./components/SeasonDashboard'));
+const WeeklyRecapPage = lazy(() => import('./components/WeeklyRecapPage'));
+const EventFilterBar = lazy(() => import('./components/EventFilterBar'));
+const TrendsPage = lazy(() => import('./components/TrendsPage'));
 
 type Tab = 'overview' | 'trends' | 'scoring' | 'settings';
 type OverviewPanel = 'current-rankings' | 'ranking-history' | 'cumulative-points-race' | 'points-by-player' | 'points-matrix';
@@ -108,6 +109,15 @@ const THEME_COLOR_KEYS = [
   '--chart-tick',
 ] as const;
 
+function LazySectionFallback() {
+  return (
+    <div className="chart-container" style={{ marginTop: 0 }}>
+      <h3 className="chart-title">Loading Section</h3>
+      <p className="chart-subtitle">Preparing charts and analytics modules.</p>
+    </div>
+  );
+}
+
 export default function App() {
   const { isDark, toggle: toggleTheme } = useTheme();
   const { isAdmin, tryUnlock, lock } = useAdminMode();
@@ -118,7 +128,7 @@ export default function App() {
   const [league, setLeague] = useState<LeagueData>(EMPTY_LEAGUE);
   const [colorScheme, setColorScheme] = useState<ColorSchemeConfig>(EMPTY_COLOR_SCHEME);
   const [courseConfig, setCourseConfig] = useState<CourseConfig | null>(null);
-  const [playerConfig, setPlayerConfig] = useState<PlayerConfig>({ active: {} });
+  const [playerConfig, setPlayerConfig] = useState<PlayerConfig>({ active: {}, nicknames: {} });
   const [hiddenEventIds, setHiddenEventIds] = useState<Set<string>>(new Set());
   const [showModal, setShowModal] = useState(false);
   const [showCourseModal, setShowCourseModal] = useState(false);
@@ -280,11 +290,11 @@ export default function App() {
     setLeague(emptyLeague);
     setColorScheme(EMPTY_COLOR_SCHEME);
     setCourseConfig(null);
-    setPlayerConfig({ active: {} });
+    setPlayerConfig({ active: {}, nicknames: {} });
     setHiddenEventIds(new Set());
     saveLeagueDataById(id, emptyLeague);
     saveColorSchemeById(id, EMPTY_COLOR_SCHEME);
-    savePlayerConfigById(id, { active: {} });
+    savePlayerConfigById(id, { active: {}, nicknames: {} });
     saveHiddenEventIdsById(id, new Set());
     setAvailableLeagues((prev) => [...prev, { id, name: emptyLeague.leagueName }]
       .reduce<BuiltInLeague[]>((acc, league) => {
@@ -481,14 +491,18 @@ export default function App() {
     const cleared = { ...league, events: [] };
     setLeague(cleared);
     saveLeagueDataById(activeLeagueId, cleared);
-    const clearedConfig = { active: {} } as PlayerConfig;
+    const clearedConfig = { active: {}, nicknames: { ...(playerConfig.nicknames ?? {}) } } as PlayerConfig;
     setPlayerConfig(clearedConfig);
     savePlayerConfigById(activeLeagueId, clearedConfig);
-  }, [league, activeLeagueId]);
+  }, [league, activeLeagueId, playerConfig.nicknames]);
 
   const handlePlayerConfigChange = useCallback((config: PlayerConfig) => {
-    setPlayerConfig(config);
-    savePlayerConfigById(activeLeagueId, config);
+    const normalized: PlayerConfig = {
+      active: { ...(config.active ?? {}) },
+      nicknames: { ...(config.nicknames ?? {}) },
+    };
+    setPlayerConfig(normalized);
+    savePlayerConfigById(activeLeagueId, normalized);
   }, [activeLeagueId]);
 
   const handleRenamePlayer = useCallback((currentName: string, nextName: string) => {
@@ -523,8 +537,14 @@ export default function App() {
       delete nextActive[currentName];
     }
 
+    const nextNicknames = { ...(playerConfig.nicknames ?? {}) };
+    if (Object.prototype.hasOwnProperty.call(nextNicknames, currentName)) {
+      nextNicknames[trimmedName] = nextNicknames[currentName];
+      delete nextNicknames[currentName];
+    }
+
     const recalculated = { ...renamedLeague, events: recalculateCumulativeStandings(renamedLeague.events, league.adjustedScoring) };
-    const nextConfig = applyAutoHide({ active: nextActive }, recalculated.events);
+    const nextConfig = applyAutoHide({ active: nextActive, nicknames: nextNicknames }, recalculated.events);
     const nextPlayerColors = { ...colorScheme.playerColors };
     if (Object.prototype.hasOwnProperty.call(nextPlayerColors, currentName)) {
       nextPlayerColors[trimmedName] = nextPlayerColors[currentName];
@@ -539,7 +559,7 @@ export default function App() {
     setColorScheme(nextColorScheme);
     saveColorSchemeById(activeLeagueId, nextColorScheme);
     if (profilePlayer === currentName) setProfilePlayer(trimmedName);
-  }, [activeLeagueId, colorScheme, league, playerConfig.active, profilePlayer]);
+  }, [activeLeagueId, colorScheme, league, playerConfig.active, playerConfig.nicknames, profilePlayer]);
 
   const handleRenameEvent = useCallback((eventId: string, nextName: string) => {
     const trimmedName = nextName.trim();
@@ -579,6 +599,23 @@ export default function App() {
     };
     setLeague(updated);
     saveLeagueDataById(activeLeagueId, updated);
+  }, [activeLeagueId, league]);
+
+  const handleUpdateEventSide = useCallback((eventId: string, nextSide: 'front' | 'back') => {
+    const updated: LeagueData = {
+      ...league,
+      events: league.events.map((event) => (
+        event.id === eventId
+          ? { ...event, nineHoles: nextSide }
+          : event
+      )),
+    };
+    const recalculated = {
+      ...updated,
+      events: recalculateCumulativeStandings(updated.events, updated.adjustedScoring),
+    };
+    setLeague(recalculated);
+    saveLeagueDataById(activeLeagueId, recalculated);
   }, [activeLeagueId, league]);
 
   const handlePlayerColorChange = useCallback((playerName: string, color: string) => {
@@ -781,6 +818,7 @@ export default function App() {
         </div>
 
         <div className="charts-area">
+          <Suspense fallback={<LazySectionFallback />}>
           {activeTab === 'overview' && (
             <div className="overview-stack">
               <div className="chart-container overview-panel-card" style={{ marginTop: 0 }}>
@@ -955,6 +993,7 @@ export default function App() {
               onRenameEvent={handleRenameEvent}
               onUpdateEventDate={handleUpdateEventDate}
               onUpdateEventWeather={handleUpdateEventWeather}
+              onUpdateEventSide={handleUpdateEventSide}
               colorScheme={colorScheme}
               onPlayerColorChange={handlePlayerColorChange}
               onClearPlayerColor={handleClearPlayerColor}
@@ -980,27 +1019,30 @@ export default function App() {
               onCreateLeague={handleCreateLeague}
             />
           )}
+          </Suspense>
         </div>
       </main>
 
-      {isAdmin && showModal && <AddEventModal onClose={() => setShowModal(false)} onAdd={handleAddEvent} courseConfig={courseConfig} activePlayerNames={activePlayerNames} />}
-      {isAdmin && showCourseModal && <CourseConfigModal initial={courseConfig} onSave={handleSaveCourse} onClose={() => setShowCourseModal(false)} />}
-      {showAdminModal && <AdminUnlockModal onUnlock={(pin) => { const ok = tryUnlock(pin); if (ok) setShowAdminModal(false); return ok; }} onClose={() => setShowAdminModal(false)} />}
-      {holeProfile && (
-        <HoleProfileModal
-          holeNum={holeProfile.holeNum}
-          nine={holeProfile.nine}
-          events={filteredEvents}
-          courseConfig={courseConfig}
-          onClose={() => setHoleProfile(null)}
-          onShowHole={(holeNum, nine) => setHoleProfile({ holeNum, nine })}
-          onPlayerClick={(playerName) => {
-            setHoleProfile(null);
-            setProfilePlayer(playerName);
-          }}
-        />
-      )}
-      {profilePlayer && <PlayerProfileModal playerName={profilePlayer} events={filteredEvents} courseConfig={courseConfig} yardageBandSettings={league.yardageBandSettings} handicapMode={league.handicapMode} analysisSettings={league.analysisSettings} adjustedScoring={league.adjustedScoring} onHoleClick={(n, nine) => { setProfilePlayer(null); setHoleProfile({ holeNum: n, nine }); }} onClose={() => setProfilePlayer(null)} />}
+      <Suspense fallback={null}>
+        {isAdmin && showModal && <AddEventModal onClose={() => setShowModal(false)} onAdd={handleAddEvent} courseConfig={courseConfig} activePlayerNames={activePlayerNames} weatherSettings={league.weatherSettings} />}
+        {isAdmin && showCourseModal && <CourseConfigModal initial={courseConfig} onSave={handleSaveCourse} onClose={() => setShowCourseModal(false)} />}
+        {showAdminModal && <AdminUnlockModal onUnlock={(pin) => { const ok = tryUnlock(pin); if (ok) setShowAdminModal(false); return ok; }} onClose={() => setShowAdminModal(false)} />}
+        {holeProfile && (
+          <HoleProfileModal
+            holeNum={holeProfile.holeNum}
+            nine={holeProfile.nine}
+            events={filteredEvents}
+            courseConfig={courseConfig}
+            onClose={() => setHoleProfile(null)}
+            onShowHole={(holeNum, nine) => setHoleProfile({ holeNum, nine })}
+            onPlayerClick={(playerName) => {
+              setHoleProfile(null);
+              setProfilePlayer(playerName);
+            }}
+          />
+        )}
+        {profilePlayer && <PlayerProfileModal playerName={profilePlayer} events={filteredEvents} courseConfig={courseConfig} yardageBandSettings={league.yardageBandSettings} playerNicknames={playerConfig.nicknames} handicapMode={league.handicapMode} analysisSettings={league.analysisSettings} adjustedScoring={league.adjustedScoring} onHoleClick={(n, nine) => { setProfilePlayer(null); setHoleProfile({ holeNum: n, nine }); }} onClose={() => setProfilePlayer(null)} />}
+      </Suspense>
 
       <nav className="mobile-bottom-nav">
         {TABS.map(tab => (

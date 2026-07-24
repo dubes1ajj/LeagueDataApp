@@ -129,9 +129,15 @@ function buildRankMap(scoresByPlayer: Record<string, number>): Record<string, Me
   const total = sortable.length;
   const rankByPlayer: Record<string, MetricRank> = {};
 
-  sortable.forEach(([name, score]) => {
-    const rank = sortable.findIndex(([, value]) => Math.abs(value - score) < 1e-9) + 1;
-    rankByPlayer[name] = { rank, total };
+  let lastScore: number | null = null;
+  let currentRank = 0;
+
+  sortable.forEach(([name, score], index) => {
+    if (lastScore === null || Math.abs(score - lastScore) > 1e-9) {
+      currentRank = index + 1;
+      lastScore = score;
+    }
+    rankByPlayer[name] = { rank: currentRank, total };
   });
 
   return rankByPlayer;

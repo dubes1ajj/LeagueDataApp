@@ -1,6 +1,6 @@
 import { useMemo, useState } from 'react';
 import { parseGolfSoftwareHTML } from '../lib/parser';
-import type { CourseConfig, EventData, EventWeather, PlayerEventData, StandingEntry } from '../types/golf';
+import type { CourseConfig, EventData, EventWeather, LeagueWeatherSettings, PlayerEventData, StandingEntry } from '../types/golf';
 import { computeBreakdown, getParsForNine } from '../lib/scoring';
 import { X, Upload, Link, PencilLine, Plus, Trash2 } from 'lucide-react';
 
@@ -9,6 +9,7 @@ interface AddEventModalProps {
   onAdd: (event: Omit<EventData, 'id'>) => void;
   courseConfig: CourseConfig | null;
   activePlayerNames: string[];
+  weatherSettings: LeagueWeatherSettings;
 }
 
 type ManualPlayerRow = {
@@ -51,10 +52,12 @@ function formatEventDate(value: string): string {
   return `${Number(match[2])}/${Number(match[3])}/${match[1]}`;
 }
 
-export default function AddEventModal({ onClose, onAdd, courseConfig, activePlayerNames }: AddEventModalProps) {
+export default function AddEventModal({ onClose, onAdd, courseConfig, activePlayerNames, weatherSettings }: AddEventModalProps) {
   const [tab, setTab] = useState<'paste' | 'url' | 'manual'>('paste');
   const [htmlInput, setHtmlInput] = useState('');
   const [urlInput, setUrlInput] = useState('');
+  const [urlSideMode, setUrlSideMode] = useState<'auto' | 'front' | 'back'>('auto');
+  const [urlFetchWeather, setUrlFetchWeather] = useState(false);
   const [manualEventNumber, setManualEventNumber] = useState('');
   const [manualEventDate, setManualEventDate] = useState('');
   const [manualNine, setManualNine] = useState<'front' | 'back'>('front');
@@ -67,6 +70,93 @@ export default function AddEventModal({ onClose, onAdd, courseConfig, activePlay
   const [activeTargetRowId, setActiveTargetRowId] = useState<string | null>(null);
   const [error, setError] = useState('');
   const [loading, setLoading] = useState(false);
+
+  function parseEventDateToIso(value: string): string | null {
+    const trimmed = value.trim();
+    if (!trimmed) return null;
+
+    const isoMatch = trimmed.match(/^(\d{4})-(\d{2})-(\d{2})$/);
+    if (isoMatch) return `${isoMatch[1]}-${isoMatch[2]}-${isoMatch[3]}`;
+
+    const usMatch = trimmed.match(/^(\d{1,2})\/(\d{1,2})\/(\d{2,4})$/);
+    if (!usMatch) return null;
+
+    const month = Number.parseInt(usMatch[1], 10);
+    const day = Number.parseInt(usMatch[2], 10);
+    let year = Number.parseInt(usMatch[3], 10);
+    if (year < 100) year += 2000;
+    if (!Number.isFinite(month) || !Number.isFinite(day) || !Number.isFinite(year)) return null;
+    if (month < 1 || month > 12 || day < 1 || day > 31) return null;
+
+    return `${String(year).padStart(4, '0')}-${String(month).padStart(2, '0')}-${String(day).padStart(2, '0')}`;
+  }
+
+  function weatherSummaryFromCode(code: number): string {
+    if (code === 0) return 'Clear';
+    if (code === 1) return 'Mostly clear';
+    if (code === 2) return 'Partly cloudy';
+    if (code === 3) return 'Overcast';
+    if ([45, 48].includes(code)) return 'Fog';
+    if ([51, 53, 55, 56, 57].includes(code)) return 'Drizzle';
+    if ([61, 63, 65, 66, 67, 80, 81, 82].includes(code)) return 'Rain';
+    if ([71, 73, 75, 77, 85, 86].includes(code)) return 'Snow';
+    if ([95, 96, 99].includes(code)) return 'Thunderstorm';
+    return 'Mixed conditions';
+  }
+
+  async function fetchWeatherForEventDate(eventDate: string): Promise<EventWeather> {
+    if (typeof weatherSettings.latitude !== 'number' || typeof weatherSettings.longitude !== 'number') {
+      throw new Error('Weather location is not configured yet. Set Weather location in Settings first.');
+    }
+
+    const isoDate = parseEventDateToIso(eventDate);
+    if (!isoDate) {
+      throw new Error('Event date format is not recognized for weather lookup.');
+    }
+
+    const playHour = Number.parseInt((weatherSettings.playTime || '17:00').split(':')[0], 10);
+    const targetHour = Number.isFinite(playHour) ? Math.max(0, Math.min(23, playHour)) : 17;
+
+    const endpoint = new URL('https://api.open-meteo.com/v1/forecast');
+    endpoint.searchParams.set('latitude', String(weatherSettings.latitude));
+    endpoint.searchParams.set('longitude', String(weatherSettings.longitude));
+    endpoint.searchParams.set('start_date', isoDate);
+    endpoint.searchParams.set('end_date', isoDate);
+    endpoint.searchParams.set('hourly', 'temperature_2m,apparent_temperature,precipitation,wind_speed_10m,weather_code');
+    endpoint.searchParams.set('temperature_unit', 'fahrenheit');
+    endpoint.searchParams.set('wind_speed_unit', 'mph');
+
+    const res = await fetch(endpoint.toString());
+    if (!res.ok) throw new Error(`Weather request failed (HTTP ${res.status}).`);
+
+    const data = await res.json() as {
+      hourly?: {
+        time?: string[];
+        temperature_2m?: Array<number | null>;
+        apparent_temperature?: Array<number | null>;
+        precipitation?: Array<number | null>;
+        wind_speed_10m?: Array<number | null>;
+        weather_code?: Array<number | null>;
+      };
+    };
+
+    const times = data.hourly?.time ?? [];
+    if (!times.length) throw new Error('Weather service returned no hourly data for that date.');
+
+    const matchedIndex = times.findIndex((time) => Number.parseInt(time.slice(11, 13), 10) >= targetHour);
+    const idx = matchedIndex >= 0 ? matchedIndex : times.length - 1;
+
+    const code = data.hourly?.weather_code?.[idx] ?? data.hourly?.weather_code?.[0] ?? null;
+    const summary = code !== null ? weatherSummaryFromCode(code) : 'Weather observed';
+
+    return {
+      summary,
+      temperatureF: data.hourly?.temperature_2m?.[idx] ?? undefined,
+      feelsLikeF: data.hourly?.apparent_temperature?.[idx] ?? undefined,
+      precipitationMm: data.hourly?.precipitation?.[idx] ?? undefined,
+      windMph: data.hourly?.wind_speed_10m?.[idx] ?? undefined,
+    };
+  }
 
   const holeLabels = useMemo(
     () => Array.from({ length: 9 }, (_, index) => (manualNine === 'front' ? index + 1 : index + 10)),
@@ -123,12 +213,28 @@ export default function AddEventModal({ onClose, onAdd, courseConfig, activePlay
         setLoading(false);
         return;
       }
-      onAdd(withManualWeather({
+
+      const resolvedSide = urlSideMode === 'auto' ? parsed.nineHoles : urlSideMode;
+      const manualWeather = buildManualWeather();
+      let importedWeather: EventWeather | undefined = manualWeather;
+      if (urlFetchWeather) {
+        const fetchedWeather = await fetchWeatherForEventDate(parsed.eventDate);
+        importedWeather = {
+          ...fetchedWeather,
+          ...manualWeather,
+          summary: manualWeather?.summary ?? fetchedWeather.summary,
+        };
+      }
+
+      onAdd({
         ...parsed,
         sourceType: 'url',
         sourceUrl: parsedUrl.toString(),
         sourceFetchedAt: new Date().toISOString(),
-      }));
+        nineHoles: resolvedSide,
+        eventWeather: importedWeather,
+      });
+      setLoading(false);
     } catch (e) {
       setError(`Failed to fetch: ${(e as Error).message}. Try the "Paste HTML" tab if the error persists.`);
       setLoading(false);
@@ -416,7 +522,7 @@ export default function AddEventModal({ onClose, onAdd, courseConfig, activePlay
           <div className="modal-body">
             <p className="hint">
               Paste the standings page URL from golfsoftware.com. The app fetches it
-              through a local proxy so the SSL certificate is handled by Node.js, not your browser. The played nine is auto-detected from the page.
+              through a local proxy so the SSL certificate is handled by Node.js, not your browser.
             </p>
             <input
               className="url-input"
@@ -425,6 +531,28 @@ export default function AddEventModal({ onClose, onAdd, courseConfig, activePlay
               value={urlInput}
               onChange={e => setUrlInput(e.target.value)}
             />
+            <div className="manual-event-grid" style={{ marginTop: 12 }}>
+              <label className="manual-field">
+                <span className="manual-label">Played Side</span>
+                <select className="url-input" value={urlSideMode} onChange={(e) => setUrlSideMode(e.target.value as 'auto' | 'front' | 'back')}>
+                  <option value="auto">Auto-detect from page</option>
+                  <option value="front">Front 9 (manual)</option>
+                  <option value="back">Back 9 (manual)</option>
+                </select>
+              </label>
+              <label className="manual-field">
+                <span className="manual-label">Fetch Weather For League Location?</span>
+                <select className="url-input" value={urlFetchWeather ? 'yes' : 'no'} onChange={(e) => setUrlFetchWeather(e.target.value === 'yes')}>
+                  <option value="no">No</option>
+                  <option value="yes">Yes</option>
+                </select>
+              </label>
+            </div>
+            {urlFetchWeather && (
+              <p className="hint" style={{ marginTop: 8 }}>
+                Weather source: {weatherSettings.locationName || 'No location configured yet'} at {weatherSettings.playTime || '17:00'} local time.
+              </p>
+            )}
             {renderWeatherFields()}
             {error && <p className="error">{error}</p>}
             <div className="modal-actions">

@@ -30,6 +30,7 @@ import {
   type WorkbookLayout,
 } from '../lib/excelImport';
 import { formatEventDateDisplay } from '../lib/eventDateDisplay';
+import { buildAutomaticYardageBandSettings, resolveYardageBandSettings } from '../lib/yardage';
 import { Upload, Download, Link, CheckCircle, XCircle, Loader, Edit2, Save, Trash2 } from 'lucide-react';
 
 interface DataPageProps {
@@ -205,6 +206,7 @@ interface LeagueSettingsSectionProps {
   activeLeagueId: string;
   availableLeagues: BuiltInLeague[];
   league: LeagueData;
+  courseConfig: CourseConfig | null;
   onLeagueNameChange: (name: string) => void;
   onLeagueImageChange: (imageDataUrl: string | null) => void;
   onLeagueHandicapModeChange: (mode: HandicapMode) => void;
@@ -364,6 +366,7 @@ export function LeagueSettingsSection({
   activeLeagueId,
   availableLeagues,
   league,
+  courseConfig,
   onLeagueNameChange,
   onLeagueImageChange,
   onLeagueHandicapModeChange,
@@ -389,6 +392,10 @@ export function LeagueSettingsSection({
     () => Object.values(league.analysisSettings.weights).reduce((sum, value) => sum + (Number.isFinite(value) ? value : 0), 0),
     [league.analysisSettings.weights]
   );
+  const effectiveYardageBandSettings = useMemo(
+    () => resolveYardageBandSettings(league.yardageBandSettings, courseConfig),
+    [league.yardageBandSettings, courseConfig],
+  );
 
   function updateAnalysisWeight(key: AnalysisMetricKey, value: number) {
     const nextValue = Number.isFinite(value) ? Math.max(0, value) : 0;
@@ -405,10 +412,22 @@ export function LeagueSettingsSection({
     const nextValue = Number.isFinite(value) ? Math.max(1, Math.round(value)) : 1;
     onLeagueYardageBandSettingsChange({
       ...league.yardageBandSettings,
+      mode: 'manual',
       [par]: {
         ...league.yardageBandSettings[par],
         [threshold]: nextValue,
       },
+    });
+  }
+
+  function handleYardageModeChange(mode: 'manual' | 'auto') {
+    if (mode === 'auto') {
+      onLeagueYardageBandSettingsChange(buildAutomaticYardageBandSettings(courseConfig, league.yardageBandSettings));
+      return;
+    }
+    onLeagueYardageBandSettingsChange({
+      ...league.yardageBandSettings,
+      mode: 'manual',
     });
   }
 
@@ -781,9 +800,28 @@ export function LeagueSettingsSection({
       <div className="data-field-row" style={{ marginTop: 12, alignItems: 'flex-start' }}>
         <label className="data-field-label">Yardage Bands</label>
         <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(220px, 1fr))', gap: 8, flex: 1 }}>
+          <div style={{ gridColumn: '1 / -1', display: 'flex', flexWrap: 'wrap', alignItems: 'center', gap: 8 }}>
+            <select
+              className="url-input"
+              style={{ maxWidth: 260 }}
+              value={league.yardageBandSettings.mode}
+              onChange={(e) => handleYardageModeChange(e.target.value as 'manual' | 'auto')}
+            >
+              <option value="manual">Manual mode</option>
+              <option value="auto">Automatic mode (from scorecard yardages)</option>
+            </select>
+            <button
+              className="btn-secondary"
+              onClick={() => onLeagueYardageBandSettingsChange(buildAutomaticYardageBandSettings(courseConfig, league.yardageBandSettings))}
+              disabled={!courseConfig}
+            >
+              Recompute Auto Bands
+            </button>
+            {!courseConfig && <span style={{ color: 'var(--text2)', fontSize: 12 }}>Configure course yardages to enable automatic mode.</span>}
+          </div>
           {(['par3', 'par4', 'par5'] as const).map((parKey) => {
             const rowLabel = parKey === 'par3' ? 'Par 3' : parKey === 'par4' ? 'Par 4' : 'Par 5';
-            const thresholds = league.yardageBandSettings[parKey];
+            const thresholds = effectiveYardageBandSettings[parKey];
             return (
               <div key={parKey} className="recap-stat-card" style={{ gap: 8 }}>
                 <span className="recap-stat-label">{rowLabel} Cutoffs</span>
@@ -796,6 +834,7 @@ export function LeagueSettingsSection({
                       min={1}
                       step={1}
                       value={thresholds.shortMax}
+                      disabled={league.yardageBandSettings.mode === 'auto'}
                       onChange={(e) => updateYardageBandThreshold(parKey, 'shortMax', Number.parseInt(e.target.value, 10))}
                     />
                   </div>
@@ -807,6 +846,7 @@ export function LeagueSettingsSection({
                       min={1}
                       step={1}
                       value={thresholds.midMax}
+                      disabled={league.yardageBandSettings.mode === 'auto'}
                       onChange={(e) => updateYardageBandThreshold(parKey, 'midMax', Number.parseInt(e.target.value, 10))}
                     />
                   </div>
@@ -818,6 +858,7 @@ export function LeagueSettingsSection({
                       min={1}
                       step={1}
                       value={thresholds.longMax}
+                      disabled={league.yardageBandSettings.mode === 'auto'}
                       onChange={(e) => updateYardageBandThreshold(parKey, 'longMax', Number.parseInt(e.target.value, 10))}
                     />
                   </div>
@@ -1556,6 +1597,7 @@ export default function DataPage({
             activeLeagueId={activeLeagueId}
             availableLeagues={availableLeagues}
             league={league}
+            courseConfig={courseConfig}
             onLeagueNameChange={onLeagueNameChange}
             onLeagueImageChange={onLeagueImageChange ?? (() => {})}
             onLeagueHandicapModeChange={onLeagueHandicapModeChange}

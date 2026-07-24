@@ -8,7 +8,7 @@ import type { AdjustedScoringSettings, AnalysisMetricKey, EventData, CourseConfi
 import { getPlayerColor } from '../lib/colors';
 import { buildLeagueAnalysisRanking } from '../lib/analysisRanking';
 import { computeBreakdown, getParsForNine } from '../lib/scoring';
-import { getYardageBandDescription, getYardageBandKey, YARDAGE_BANDS, type YardageBandKey } from '../lib/yardage';
+import { getYardageBandDescription, getYardageBandKey, resolveYardageBandSettings, YARDAGE_BANDS, type YardageBandKey } from '../lib/yardage';
 import { useChartColors } from '../lib/useChartColors';
 import { X, TrendingUp, TrendingDown, Minus } from 'lucide-react';
 import { getEventDisplayName } from '../lib/eventNames';
@@ -19,6 +19,7 @@ interface PlayerProfileModalProps {
   events: EventData[];
   courseConfig: CourseConfig | null;
   yardageBandSettings: LeagueYardageBandSettings;
+  playerNicknames?: Record<string, string>;
   handicapMode: HandicapMode;
   analysisSettings: LeagueAnalysisSettings;
   adjustedScoring?: AdjustedScoringSettings;
@@ -540,7 +541,7 @@ const METRIC_LABELS: Record<AnalysisMetricKey, string> = {
 
 // ── Main component ────────────────────────────────────────────────────────────
 export default function PlayerProfileModal({
-  playerName, events, courseConfig, yardageBandSettings, handicapMode, analysisSettings, adjustedScoring, onHoleClick, onClose,
+  playerName, events, courseConfig, yardageBandSettings, playerNicknames, handicapMode, analysisSettings, adjustedScoring, onHoleClick, onClose,
 }: PlayerProfileModalProps) {
   const [showRankExplain, setShowRankExplain] = useState(false);
   const color = getPlayerColor(playerName);
@@ -559,6 +560,10 @@ export default function PlayerProfileModal({
   const handicapLongLabel = handicapMode === 'front-back' ? 'Side Handicap' : 'Handicap';
   const adjustedMode = adjustedScoring?.mode ?? 'none';
   const adjustedDropCount = Math.max(0, Math.floor(adjustedScoring?.dropCount ?? 0));
+  const effectiveYardageBandSettings = useMemo(
+    () => resolveYardageBandSettings(yardageBandSettings, courseConfig),
+    [yardageBandSettings, courseConfig],
+  );
   const sortedEvents = useMemo(() =>
     [...events].sort((a, b) => a.eventNumber - b.eventNumber), [events]);
 
@@ -786,7 +791,8 @@ export default function PlayerProfileModal({
     ].join(':');
     const summarySeed = `${nicknameSeed}:${stats.hcpTrend}:${Math.round((damageControl ?? 0) * 10)}:${Math.round((bounceBackRate ?? 0) * 10)}`;
 
-    const nickname = uniqueNicknames.get(playerName) ?? 'Fairway Menace';
+    const manualNickname = playerNicknames?.[playerName]?.trim();
+    const nickname = manualNickname || uniqueNicknames.get(playerName) || 'Fairway Menace';
 
     const factDeck = [
       profileMetrics.eventWins > 0 || topThreeRate >= 0.5 ? {
@@ -1073,7 +1079,7 @@ export default function PlayerProfileModal({
       watchItem,
       badges: badgeItems,
     };
-  }, [playerName, profileMetrics, stats, uniqueNicknames]);
+  }, [playerName, playerNicknames, profileMetrics, stats, uniqueNicknames]);
 
   // ── Scoring breakdown totals (uses course pars if available) ──────────────
   const breakdown = useMemo(() => {
@@ -1253,7 +1259,7 @@ export default function PlayerProfileModal({
         hasAnyYardage = true;
         const holeNumber = startIndex + holeIndex + 1;
         const par = pars[holeIndex];
-        const bandKey = getYardageBandKey(yardage, par, yardageBandSettings);
+        const bandKey = getYardageBandKey(yardage, par, effectiveYardageBandSettings);
 
         const playerScore = data.holes[holeIndex];
         if (playerScore !== null && playerScore !== undefined) {
@@ -1300,7 +1306,7 @@ export default function PlayerProfileModal({
       const field = fieldAggregates[band.key];
       return {
         key: band.key,
-        label: `${band.label} (${getYardageBandDescription(band.key, yardageBandSettings)})`,
+        label: `${band.label} (${getYardageBandDescription(band.key, effectiveYardageBandSettings)})`,
         playerHoles: player.holes,
         holeNumbers: Array.from(player.holeNumbers).sort((a, b) => a - b),
         playerAvgVsPar: player.holes > 0 ? player.diffTotal / player.holes : null,
@@ -1342,7 +1348,7 @@ export default function PlayerProfileModal({
       toughestRow,
       bestEfficiencyRow,
     };
-  }, [courseConfig, playerRounds, yardageBandSettings]);
+  }, [courseConfig, effectiveYardageBandSettings, playerRounds]);
 
   // ── Hole-by-hole scorecard table ──────────────────────────────────────────
   const roundScorecardGroups = useMemo(() => {

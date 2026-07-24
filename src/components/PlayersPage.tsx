@@ -2,6 +2,7 @@ import { useMemo, useState } from 'react';
 import type { ColorSchemeConfig, EventData, HandicapMode, PlayerConfig } from '../types/golf';
 import { getPlayerColor } from '../lib/colors';
 import { Edit2, Save, X } from 'lucide-react';
+import { NICKNAME_PRESETS } from '../lib/nicknamePresets';
 
 interface PlayersPageProps {
   events: EventData[];
@@ -68,13 +69,28 @@ export default function PlayersPage({
   function toggle(name: string) {
     onChange({
       active: { ...playerConfig.active, [name]: !isActive(name) },
+      nicknames: { ...(playerConfig.nicknames ?? {}) },
     });
   }
 
   function setAll(value: boolean) {
     const active: Record<string, boolean> = {};
     for (const p of players) active[p.name] = value;
-    onChange({ active });
+    onChange({ active, nicknames: { ...(playerConfig.nicknames ?? {}) } });
+  }
+
+  function setNickname(playerName: string, value: string | undefined) {
+    const trimmed = (value ?? '').trim();
+    const nextNicknames = { ...(playerConfig.nicknames ?? {}) };
+    if (!trimmed) {
+      delete nextNicknames[playerName];
+    } else {
+      nextNicknames[playerName] = trimmed;
+    }
+    onChange({
+      active: { ...playerConfig.active },
+      nicknames: nextNicknames,
+    });
   }
 
   function startEditing(name: string) {
@@ -130,6 +146,11 @@ export default function PlayersPage({
           const lastName = player.name.split(',')[0].trim();
           const firstName = player.name.split(',')[1]?.trim() ?? '';
           const isEditing = editingPlayer === player.name;
+          const nicknameOverride = playerConfig.nicknames?.[player.name]?.trim() ?? '';
+          const hasPresetNickname = nicknameOverride.length > 0 && NICKNAME_PRESETS.includes(nicknameOverride);
+          const selectedNickname = nicknameOverride.length === 0
+            ? '__auto__'
+            : (hasPresetNickname ? nicknameOverride : '__custom__');
           return (
             <div
               key={player.name}
@@ -172,6 +193,45 @@ export default function PlayersPage({
                     : 'No rounds played'}
                   {hasColorOverride ? ' · custom color' : ''}
                 </span>
+                <div
+                  style={{ display: 'grid', gridTemplateColumns: 'minmax(140px, 1fr) minmax(120px, 1fr)', gap: 6, marginTop: 8 }}
+                  onClick={(e) => e.stopPropagation()}
+                >
+                  <select
+                    className="url-input"
+                    style={{ minWidth: 0, padding: '5px 8px', fontSize: 12 }}
+                    value={selectedNickname}
+                    onChange={(e) => {
+                      const value = e.target.value;
+                      if (value === '__auto__') {
+                        setNickname(player.name, undefined);
+                        return;
+                      }
+                      if (value === '__custom__') {
+                        if (hasPresetNickname) {
+                          setNickname(player.name, '');
+                        }
+                        return;
+                      }
+                      setNickname(player.name, value);
+                    }}
+                    title="Nickname preset"
+                  >
+                    <option value="__auto__">Nickname: Auto</option>
+                    <option value="__custom__">Nickname: Custom</option>
+                    {NICKNAME_PRESETS.map((nickname) => (
+                      <option key={`${player.name}-${nickname}`} value={nickname}>{nickname}</option>
+                    ))}
+                  </select>
+                  <input
+                    className="url-input"
+                    style={{ minWidth: 0, padding: '5px 8px', fontSize: 12 }}
+                    placeholder="Custom nickname"
+                    value={hasPresetNickname ? '' : nicknameOverride}
+                    onChange={(e) => setNickname(player.name, e.target.value)}
+                    title="Custom nickname override"
+                  />
+                </div>
               </div>
               <div className="player-card-toggle" onClick={(e) => e.stopPropagation()}>
                 <input

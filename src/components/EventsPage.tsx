@@ -11,6 +11,7 @@ interface EventsPageProps {
   onRename: (eventId: string, nextName: string) => void;
   onUpdateEventDate: (eventId: string, nextDate: string) => void;
   onUpdateEventWeather: (eventId: string, nextWeather: EventWeather | undefined) => void;
+  onUpdateEventSide: (eventId: string, nextSide: 'front' | 'back') => void;
   onEventColorChange: (eventId: string, color: string) => void;
   onClearEventColor: (eventId: string) => void;
 }
@@ -21,6 +22,7 @@ export default function EventsPage({
   onRename,
   onUpdateEventDate,
   onUpdateEventWeather,
+  onUpdateEventSide,
   onEventColorChange,
   onClearEventColor,
 }: EventsPageProps) {
@@ -33,6 +35,7 @@ export default function EventsPage({
   const [editedWeatherFeelsLikeF, setEditedWeatherFeelsLikeF] = useState('');
   const [editedWeatherPrecipMm, setEditedWeatherPrecipMm] = useState('');
   const [editedWeatherWindMph, setEditedWeatherWindMph] = useState('');
+  const [editedSide, setEditedSide] = useState<'front' | 'back'>('front');
 
   const sortedEvents = useMemo(
     () => [...events].sort((a, b) => a.eventNumber - b.eventNumber),
@@ -59,6 +62,7 @@ export default function EventsPage({
     setEditedWeatherFeelsLikeF(typeof event.eventWeather?.feelsLikeF === 'number' ? String(event.eventWeather.feelsLikeF) : '');
     setEditedWeatherPrecipMm(typeof event.eventWeather?.precipitationMm === 'number' ? String(event.eventWeather.precipitationMm) : '');
     setEditedWeatherWindMph(typeof event.eventWeather?.windMph === 'number' ? String(event.eventWeather.windMph) : '');
+    setEditedSide(event.nineHoles === 'back' ? 'back' : 'front');
   }
 
   function cancelEditing() {
@@ -70,6 +74,7 @@ export default function EventsPage({
     setEditedWeatherFeelsLikeF('');
     setEditedWeatherPrecipMm('');
     setEditedWeatherWindMph('');
+    setEditedSide('front');
   }
 
   function parseOptionalNumber(value: string): number | undefined {
@@ -103,6 +108,7 @@ export default function EventsPage({
     onRename(eventId, editedName);
     onUpdateEventDate(eventId, editedDate);
     onUpdateEventWeather(eventId, buildEditedWeather());
+    onUpdateEventSide(eventId, editedSide);
     cancelEditing();
   }
 
@@ -217,6 +223,17 @@ export default function EventsPage({
                         onChange={(e) => setEditedWeatherWindMph(e.target.value)}
                         placeholder="Wind mph"
                       />
+                    </div>
+                    <div style={{ display: 'grid', gridTemplateColumns: 'minmax(160px, 220px)', gap: 8 }}>
+                      <select
+                        className="url-input"
+                        style={{ minWidth: 0, padding: '6px 10px' }}
+                        value={editedSide}
+                        onChange={(e) => setEditedSide(e.target.value as 'front' | 'back')}
+                      >
+                        <option value="front">Front 9</option>
+                        <option value="back">Back 9</option>
+                      </select>
                     </div>
                   </div>
                 ) : (

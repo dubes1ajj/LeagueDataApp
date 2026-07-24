@@ -101,6 +101,7 @@ export interface YardageBandThresholds {
 }
 
 export interface LeagueYardageBandSettings {
+  mode: 'manual' | 'auto';
   par3: YardageBandThresholds;
   par4: YardageBandThresholds;
   par5: YardageBandThresholds;
@@ -147,6 +148,8 @@ export interface LeagueData {
 export interface PlayerConfig {
   /** playerName → true if active (default), false if hidden */
   active: Record<string, boolean>;
+  /** Optional per-player nickname override used in profile cards. */
+  nicknames?: Record<string, string>;
 }
 
 export interface ColorSchemeConfig {

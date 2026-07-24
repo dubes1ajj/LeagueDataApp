@@ -35,6 +35,7 @@ interface SettingsPageProps {
   onRenameEvent: (eventId: string, nextName: string) => void;
   onUpdateEventDate: (eventId: string, nextDate: string) => void;
   onUpdateEventWeather: (eventId: string, nextWeather: EventWeather | undefined) => void;
+  onUpdateEventSide: (eventId: string, nextSide: 'front' | 'back') => void;
   onPlayerColorChange: (playerName: string, color: string) => void;
   onClearPlayerColor: (playerName: string) => void;
   onEventColorChange: (eventId: string, color: string) => void;
@@ -72,6 +73,7 @@ export default memo(function SettingsPage({
   onRenameEvent,
   onUpdateEventDate,
   onUpdateEventWeather,
+  onUpdateEventSide,
   onPlayerColorChange,
   onClearPlayerColor,
   onEventColorChange,
@@ -192,6 +194,7 @@ export default memo(function SettingsPage({
               activeLeagueId={activeLeagueId}
               availableLeagues={availableLeagues}
               league={league}
+              courseConfig={courseConfig}
               onLeagueNameChange={onLeagueNameChange}
               onLeagueImageChange={onLeagueImageChange}
               onLeagueHandicapModeChange={onLeagueHandicapModeChange}
@@ -236,6 +239,7 @@ export default memo(function SettingsPage({
               onRename={onRenameEvent}
               onUpdateEventDate={onUpdateEventDate}
               onUpdateEventWeather={onUpdateEventWeather}
+              onUpdateEventSide={onUpdateEventSide}
               onEventColorChange={onEventColorChange}
               onClearEventColor={onClearEventColor}
             />

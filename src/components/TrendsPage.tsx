@@ -6,7 +6,7 @@ import HandicapTrendChart from './HandicapTrendChart';
 import ComparePlayersPanel from './ComparePlayersPanel';
 import { getPlayerColor } from '../lib/colors';
 import { getParsForNine } from '../lib/scoring';
-import { getYardageBandDescription, getYardageBandKey, YARDAGE_BANDS, type YardageBandKey } from '../lib/yardage';
+import { getYardageBandDescription, getYardageBandKey, resolveYardageBandSettings, YARDAGE_BANDS, type YardageBandKey } from '../lib/yardage';
 
 interface TrendsPageProps {
   events: EventData[];
@@ -32,7 +32,64 @@ function normalizeTrackPosition(value: number, min: number, max: number, invert 
   return Math.max(0, Math.min(1, normalized)) * 100;
 }
 
+function getStringHash(value: string): number {
+  let hash = 0;
+  for (let index = 0; index < value.length; index += 1) {
+    hash = ((hash << 5) - hash) + value.charCodeAt(index);
+    hash |= 0;
+  }
+  return Math.abs(hash);
+}
+
+function spreadPlotPoints(rows: Array<{ key: string; x: number; y: number }>): Record<string, { x: number; y: number }> {
+  const placed: Array<{ key: string; x: number; y: number }> = [];
+  const output: Record<string, { x: number; y: number }> = {};
+
+  const clamp = (value: number) => Math.max(3, Math.min(97, value));
+  const minDistance = 4.2;
+
+  for (const row of rows) {
+    const seed = getStringHash(row.key);
+    const baseAngle = (seed % 360) * (Math.PI / 180);
+
+    let bestX = clamp(row.x);
+    let bestY = clamp(row.y);
+
+    for (let step = 0; step <= 24; step += 1) {
+      const radius = step * 1.1;
+      const angle = baseAngle + step * 1.618;
+      const candidateX = clamp(row.x + Math.cos(angle) * radius);
+      const candidateY = clamp(row.y + Math.sin(angle) * radius);
+
+      const overlaps = placed.some((point) => {
+        const dx = point.x - candidateX;
+        const dy = point.y - candidateY;
+        return Math.hypot(dx, dy) < minDistance;
+      });
+
+      if (!overlaps) {
+        bestX = candidateX;
+        bestY = candidateY;
+        break;
+      }
+
+      bestX = candidateX;
+      bestY = candidateY;
+    }
+
+    placed.push({ key: row.key, x: bestX, y: bestY });
+    output[row.key] = { x: bestX, y: bestY };
+  }
+
+  return output;
+}
+
 export default memo(function TrendsPage({ events, allEvents, courseConfig, yardageBandSettings, handicapMode, analysisSettings, filterEventIds, onFilterChange, onPlayerClick }: TrendsPageProps) {
+  const effectiveYardageBandSettings = useMemo(
+    () => resolveYardageBandSettings(yardageBandSettings, courseConfig),
+    [yardageBandSettings, courseConfig],
+  );
+
   const yardageLeaders = useMemo(() => {
     if (!courseConfig || events.length === 0) return null;
 
@@ -58,7 +115,7 @@ export default memo(function TrendsPage({ events, allEvents, courseConfig, yarda
         if (yardage === null || yardage === undefined) continue;
 
         const par = pars[holeIndex];
-        const bandKey = getYardageBandKey(yardage, par, yardageBandSettings);
+        const bandKey = getYardageBandKey(yardage, par, effectiveYardageBandSettings);
 
         for (const player of ev.players) {
           if (player.didNotPlay) continue;
@@ -122,7 +179,7 @@ export default memo(function TrendsPage({ events, allEvents, courseConfig, yarda
         .sort((a, b) => a.avgVsPar - b.avgVsPar)[0] ?? null;
 
       return {
-        band: `${band.label} (${getYardageBandDescription(band.key, yardageBandSettings)})`,
+        band: `${band.label} (${getYardageBandDescription(band.key, effectiveYardageBandSettings)})`,
         playerName: bestInBand?.playerName ?? '—',
         avgVsPar: bestInBand?.avgVsPar ?? null,
         holes: bestInBand?.holes ?? 0,
@@ -138,7 +195,7 @@ export default memo(function TrendsPage({ events, allEvents, courseConfig, yarda
       efficiencyLeaders,
       specialists,
     };
-  }, [courseConfig, events, yardageBandSettings]);
+  }, [courseConfig, effectiveYardageBandSettings, events]);
 
   return (
     <>
@@ -187,6 +244,13 @@ export default memo(function TrendsPage({ events, allEvents, courseConfig, yarda
             const yMax = Math.max(...rows.map((row) => row.avgVsPar));
             const xMid = (xMin + xMax) / 2;
             const yMid = (yMin + yMax) / 2;
+            const spreadCoordinates = spreadPlotPoints(
+              rows.map((row) => ({
+                key: row.playerName,
+                x: normalizeTrackPosition(row.yardsPerStroke, xMin, xMax),
+                y: normalizeTrackPosition(row.avgVsPar, yMin, yMax, true),
+              })),
+            );
 
             return (
               <div className="yardage-trend-xy-card">
@@ -211,14 +275,17 @@ export default memo(function TrendsPage({ events, allEvents, courseConfig, yarda
                     <span className="yardage-trend-xy-quadrant yardage-trend-xy-quadrant-bl">Developing</span>
                     <span className="yardage-trend-xy-quadrant yardage-trend-xy-quadrant-br">Efficient, But Leaky</span>
                     {rows.map((row, index) => (
+                      (() => {
+                        const point = spreadCoordinates[row.playerName];
+                        return (
                       <button
                         key={`xy-${row.playerName}`}
                         type="button"
                         className={`yardage-trend-xy-dot${index < 5 ? ' yardage-trend-xy-dot-top' : ''}`}
                         onClick={onPlayerClick ? () => onPlayerClick(row.playerName) : undefined}
                         style={{
-                          left: `calc(${normalizeTrackPosition(row.yardsPerStroke, xMin, xMax)}% - 8px)`,
-                          bottom: `calc(${normalizeTrackPosition(row.avgVsPar, yMin, yMax, true)}% - 8px)`,
+                          left: `calc(${point?.x ?? 50}% - 8px)`,
+                          bottom: `calc(${point?.y ?? 50}% - 8px)`,
                           background: getPlayerColor(row.playerName),
                           cursor: onPlayerClick ? 'pointer' : 'default',
                         }}
@@ -227,6 +294,8 @@ export default memo(function TrendsPage({ events, allEvents, courseConfig, yarda
                       >
                         {index < 5 ? <span className="yardage-trend-xy-dot-rank">{index + 1}</span> : null}
                       </button>
+                        );
+                      })()
                     ))}
                   </div>
                 </div>
